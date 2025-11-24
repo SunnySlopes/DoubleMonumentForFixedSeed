@@ -1,1 +1,1 @@
-rootProject.name = "ExactCoordsSwampHut"
+rootProject.name = "DoubleMonumentForFixedSeed"
