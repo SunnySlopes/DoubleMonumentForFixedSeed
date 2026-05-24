@@ -1,6 +1,5 @@
 package project;
 
-import com.seedfinding.mccore.version.MCVersion;
 import javax.swing.*;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
@@ -19,8 +18,30 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private static final int BATCH_DEFAULT_MAX_X = 16;
     private static final int BATCH_DEFAULT_MIN_Z = -16;
     private static final int BATCH_DEFAULT_MAX_Z = 16;
-    private static final int DEFAULT_THREAD_COUNT = 8;
-    
+    private static final int DEFAULT_THREAD_COUNT = Runtime.getRuntime().availableProcessors();
+
+    private JTabbedPane tabbedPane;
+    private JComboBox<String> languageComboBox;
+    private JLabel searchSeedLabel;
+    private JLabel searchThreadCountLabel;
+    private JLabel searchVersionLabel;
+    private JLabel searchMinXLabel;
+    private JLabel searchMaxXLabel;
+    private JLabel searchMinZLabel;
+    private JLabel searchMaxZLabel;
+    private JLabel searchLanguageLabel;
+    private JLabel searchCreditLabel;
+    private JPanel searchRightPanel;
+    private JLabel batchSeedFileTitleLabel;
+    private JLabel batchThreadCountLabel;
+    private JLabel batchVersionLabel;
+    private JLabel batchMinXLabel;
+    private JLabel batchMaxXLabel;
+    private JLabel batchMinZLabel;
+    private JLabel batchMaxZLabel;
+    private JLabel batchCreditLabel;
+    private JPanel batchRightPanel;
+
     private JTextField searchSeedField;
     private JTextField searchThreadCountField;
     private JComboBox<String> versionComboBox;
@@ -39,7 +60,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JLabel searchElapsedTimeLabel;
     private JLabel searchRemainingTimeLabel;
     private JTextArea searchResultArea;
-    private SearchMonument searcher;
+    private MonumentSearchRunner searcher;
     private volatile boolean isSearchRunning = false;
     private volatile boolean isSearchPaused = false;
     private long lastSearchSeed = 0;
@@ -71,7 +92,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JTextArea batchResultArea;
     private volatile boolean isBatchSearchRunning = false;
     private volatile boolean isBatchSearchPaused = false;
-    private SearchMonument currentBatchSearcher = null;
+    private MonumentSearchRunner currentBatchSearcher = null;
     private List<Long> batchSeedList = new ArrayList<>();
     private String batchSeedFileName = "";
     
@@ -79,33 +100,50 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private Font loadedFont = null;
 
     public DoubleMonumentForFixedSeed() {
-        setTitle("Minecraft Java版二联海底神殿搜索工具");
+        I18n.initFromSystemDefault();
+        setTitle(getString("window.title"));
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
-        
+
         // 设置窗口图标
         setWindowIcon();
-        
+
         // 设置中文字体
         setChineseFont();
 
         // 创建标签页
-        JTabbedPane tabbedPane = new JTabbedPane();
+        tabbedPane = new JTabbedPane();
         tabbedPane.setFont(getLoadedFont());
-        
+
         // 第一个tab：单种子搜索
         JPanel searchPanel = createSearchPanel();
-        tabbedPane.addTab("单种子搜索", searchPanel);
-        
+        tabbedPane.addTab(getString("tab.singleSeedSearch"), searchPanel);
+
         // 第二个tab：批量种子搜索
         JPanel batchPanel = createBatchSearchPanel();
-        tabbedPane.addTab("批量种子搜索", batchPanel);
-        
+        tabbedPane.addTab(getString("tab.batchSeedSearch"), batchPanel);
+
         add(tabbedPane, BorderLayout.CENTER);
-        
+
         pack();
         setSize(1200, 800);
         setLocationRelativeTo(null);
+    }
+
+    private String getString(String key) {
+        return I18n.get(key);
+    }
+
+    private String getString(String key, Object... args) {
+        return I18n.get(key, args);
+    }
+
+    private String formatPairResult(int hangX, int hangZ, int dx, int dz, boolean lowEfficiency) {
+        return I18n.formatPair(hangX, hangZ, dx, dz, lowEfficiency);
+    }
+
+    private String nativeErrorMessage() {
+        return getString("error.nativeNotLoaded", "");
     }
 
     // 创建搜索面板（第一个功能）
@@ -125,17 +163,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         // Seed 输入
         gbc.gridx = 0;
         gbc.gridy = 0;
-        JLabel seedLabel = new JLabel("种子:");
-        seedLabel.setFont(getLoadedFont());
-        inputPanel.add(seedLabel, gbc);
+        searchSeedLabel = new JLabel(getString("label.seed"));
+        searchSeedLabel.setFont(getLoadedFont());
+        inputPanel.add(searchSeedLabel, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
         searchSeedField = new JTextField("", 20);
-        // 添加输入验证，非整数时提示
         searchSeedField.addFocusListener(new java.awt.event.FocusAdapter() {
             public void focusLost(java.awt.event.FocusEvent e) {
-                validateIntegerInput(searchSeedField, "种子");
+                validateIntegerInput(searchSeedField, getString("label.field.seed"));
             }
         });
         inputPanel.add(searchSeedField, gbc);
@@ -145,17 +182,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.gridy = 1;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        JLabel threadLabel = new JLabel("线程数:");
-        threadLabel.setFont(getLoadedFont());
-        inputPanel.add(threadLabel, gbc);
+        searchThreadCountLabel = new JLabel(getString("label.threadCount"));
+        searchThreadCountLabel.setFont(getLoadedFont());
+        inputPanel.add(searchThreadCountLabel, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
         searchThreadCountField = new JTextField(String.valueOf(DEFAULT_THREAD_COUNT), 20);
-        // 添加输入验证，非整数时提示
         searchThreadCountField.addFocusListener(new java.awt.event.FocusAdapter() {
             public void focusLost(java.awt.event.FocusEvent e) {
-                validateIntegerInput(searchThreadCountField, "线程数");
+                validateIntegerInput(searchThreadCountField, getString("label.field.threadCount"));
             }
         });
         inputPanel.add(searchThreadCountField, gbc);
@@ -165,9 +201,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.gridy = 2;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        JLabel versionLabel = new JLabel("版本:");
-        versionLabel.setFont(getLoadedFont());
-        inputPanel.add(versionLabel, gbc);
+        searchVersionLabel = new JLabel(getString("label.mcVersion"));
+        searchVersionLabel.setFont(getLoadedFont());
+        inputPanel.add(searchVersionLabel, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
@@ -181,17 +217,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.gridy = 3;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        JLabel minXLabel = new JLabel("MinX(x512):");
-        minXLabel.setFont(getLoadedFont());
-        inputPanel.add(minXLabel, gbc);
+        searchMinXLabel = new JLabel(getString("label.minX"));
+        searchMinXLabel.setFont(getLoadedFont());
+        inputPanel.add(searchMinXLabel, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
         minXField = new JTextField(String.valueOf(DEFAULT_MIN_X), 20);
-        // 添加输入验证，非整数时提示
         minXField.addFocusListener(new java.awt.event.FocusAdapter() {
             public void focusLost(java.awt.event.FocusEvent e) {
-                validateIntegerInput(minXField, "MinX");
+                validateIntegerInput(minXField, getString("label.minX").replace(":", ""));
             }
         });
         inputPanel.add(minXField, gbc);
@@ -201,16 +236,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.gridy = 4;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        JLabel maxXLabel = new JLabel("MaxX(x512):");
-        maxXLabel.setFont(getLoadedFont());
-        inputPanel.add(maxXLabel, gbc);
+        searchMaxXLabel = new JLabel(getString("label.maxX"));
+        searchMaxXLabel.setFont(getLoadedFont());
+        inputPanel.add(searchMaxXLabel, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
         maxXField = new JTextField(String.valueOf(DEFAULT_MAX_X), 20);
         maxXField.addFocusListener(new java.awt.event.FocusAdapter() {
             public void focusLost(java.awt.event.FocusEvent e) {
-                validateIntegerInput(maxXField, "MaxX");
+                validateIntegerInput(maxXField, getString("label.maxX").replace(":", ""));
             }
         });
         inputPanel.add(maxXField, gbc);
@@ -220,16 +255,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.gridy = 5;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        JLabel minZLabel = new JLabel("MinZ(x512):");
-        minZLabel.setFont(getLoadedFont());
-        inputPanel.add(minZLabel, gbc);
+        searchMinZLabel = new JLabel(getString("label.minZ"));
+        searchMinZLabel.setFont(getLoadedFont());
+        inputPanel.add(searchMinZLabel, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
         minZField = new JTextField(String.valueOf(DEFAULT_MIN_Z), 20);
         minZField.addFocusListener(new java.awt.event.FocusAdapter() {
             public void focusLost(java.awt.event.FocusEvent e) {
-                validateIntegerInput(minZField, "MinZ");
+                validateIntegerInput(minZField, getString("label.minZ").replace(":", ""));
             }
         });
         inputPanel.add(minZField, gbc);
@@ -239,38 +274,60 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.gridy = 6;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        JLabel maxZLabel = new JLabel("MaxZ(x512):");
-        maxZLabel.setFont(getLoadedFont());
-        inputPanel.add(maxZLabel, gbc);
+        searchMaxZLabel = new JLabel(getString("label.maxZ"));
+        searchMaxZLabel.setFont(getLoadedFont());
+        inputPanel.add(searchMaxZLabel, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
         maxZField = new JTextField(String.valueOf(DEFAULT_MAX_Z), 20);
         maxZField.addFocusListener(new java.awt.event.FocusAdapter() {
             public void focusLost(java.awt.event.FocusEvent e) {
-                validateIntegerInput(maxZField, "MaxZ");
+                validateIntegerInput(maxZField, getString("label.maxZ").replace(":", ""));
             }
         });
         inputPanel.add(maxZField, gbc);
 
-        // 找到二联时立即暂停选项
+        // 语言选择
         gbc.gridx = 0;
         gbc.gridy = 7;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
+        gbc.gridwidth = 1;
+        searchLanguageLabel = new JLabel(getString("label.language"));
+        searchLanguageLabel.setFont(getLoadedFont());
+        inputPanel.add(searchLanguageLabel, gbc);
+        gbc.gridx = 1;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+        String[] languageOptions = {"Chinese", "English"};
+        languageComboBox = new JComboBox<>(languageOptions);
+        if (I18n.getCurrentLocale().getLanguage().equals("zh")) {
+            languageComboBox.setSelectedIndex(0);
+        } else {
+            languageComboBox.setSelectedIndex(1);
+        }
+        languageComboBox.addActionListener(e -> changeLanguage());
+        inputPanel.add(languageComboBox, gbc);
+
+        // 找到二联时立即暂停选项
+        gbc.gridx = 0;
+        gbc.gridy = 8;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
         gbc.gridwidth = 2;
-        pauseOnPairFoundCheckBox = new JCheckBox("找到符合条件的二联时立即暂停");
+        pauseOnPairFoundCheckBox = new JCheckBox(getString("check.pauseOnPairFound"));
         pauseOnPairFoundCheckBox.setFont(getLoadedFont());
-        pauseOnPairFoundCheckBox.setSelected(false); // 默认不选中
+        pauseOnPairFoundCheckBox.setSelected(false);
         inputPanel.add(pauseOnPairFoundCheckBox, gbc);
         gbc.gridwidth = 1;
 
         // 按钮区域
         JPanel buttonPanel = new JPanel(new FlowLayout());
-        searchStartButton = new JButton("开始搜索");
-        searchPauseButton = new JButton("暂停");
-        searchStopButton = new JButton("停止");
-        searchResetButton = new JButton("重置搜索区域");
+        searchStartButton = new JButton(getString("button.startSearch"));
+        searchPauseButton = new JButton(getString("button.pause"));
+        searchStopButton = new JButton(getString("button.stop"));
+        searchResetButton = new JButton(getString("button.reset"));
         searchPauseButton.setEnabled(false);
         searchStopButton.setEnabled(false);
         buttonPanel.add(searchStartButton);
@@ -281,9 +338,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         // 静态文字展示区域（放在按钮上方）
         JPanel creditPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
         creditPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        JLabel creditLabel = new JLabel("<html><div style='text-align: center;'><br><br><br><br><br><br><br>作者：b站@SunnySlopes<br>字体：江城黑体</div></html>");
-        creditLabel.setFont(getLoadedFont()); // 使用加载的字体
-        creditPanel.add(creditLabel);
+        searchCreditLabel = new JLabel(getString("credit.text"));
+        searchCreditLabel.setFont(getLoadedFont());
+        creditPanel.add(searchCreditLabel);
 
         // 将 credit 和按钮放在一个容器中，credit 在上，按钮在下
         JPanel creditButtonPanel = new JPanel(new BorderLayout());
@@ -303,16 +360,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         pgc.gridwidth = 2;
         searchProgressBar = new JProgressBar(0, 100);
         searchProgressBar.setStringPainted(true);
-        searchProgressBar.setString("进度: 0/0 (0.00%)");
+        searchProgressBar.setString(getString("progress.initial"));
         progressPanel.add(searchProgressBar, pgc);
 
         pgc.gridwidth = 1;
         pgc.gridy = 1;
-        searchElapsedTimeLabel = new JLabel("已过时间: 0天 0时 0分 0秒");
+        searchElapsedTimeLabel = new JLabel(getString("elapsedTime.initial"));
         progressPanel.add(searchElapsedTimeLabel, pgc);
 
         pgc.gridy = 3;
-        searchRemainingTimeLabel = new JLabel("剩余时间: 计算中...");
+        searchRemainingTimeLabel = new JLabel(getString("remainingTime.calculating"));
         progressPanel.add(searchRemainingTimeLabel, pgc);
 
         leftPanel.add(inputPanel, BorderLayout.NORTH);
@@ -327,25 +384,25 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         leftContainer.add(leftBottomPanel, BorderLayout.SOUTH);
 
         // 右侧：结果显示
-        JPanel rightPanel = new JPanel(new BorderLayout());
-        rightPanel.setBorder(BorderFactory.createTitledBorder("检查结果(输出格式: /tp x 50 z (差值: dx=?, dz=?))"));
+        searchRightPanel = new JPanel(new BorderLayout());
+        searchRightPanel.setBorder(BorderFactory.createTitledBorder(getString("result.border")));
         searchResultArea = new JTextArea();
         searchResultArea.setEditable(false);
         searchResultArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         JScrollPane scrollPane = new JScrollPane(searchResultArea);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
         JPanel exportSortPanel = new JPanel(new FlowLayout());
-        searchExportButton = new JButton("导出");
+        searchExportButton = new JButton(getString("button.export"));
         searchExportButton.addActionListener(e -> exportSearchResults());
-        searchSortButton = new JButton("排序");
+        searchSortButton = new JButton(getString("button.sort"));
         searchSortButton.addActionListener(e -> sortSearchResults());
         exportSortPanel.add(searchExportButton);
         exportSortPanel.add(searchSortButton);
-        rightPanel.add(scrollPane, BorderLayout.CENTER);
-        rightPanel.add(exportSortPanel, BorderLayout.SOUTH);
+        searchRightPanel.add(scrollPane, BorderLayout.CENTER);
+        searchRightPanel.add(exportSortPanel, BorderLayout.SOUTH);
 
         // 使用 JSplitPane 分割
-        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftContainer, rightPanel);
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftContainer, searchRightPanel);
         splitPane.setDividerLocation(450);
         splitPane.setResizeWeight(0.5);
 
@@ -428,7 +485,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 isSearchPaused = false;
                 searchStartButton.setEnabled(true);
                 searchPauseButton.setEnabled(false);
-                searchPauseButton.setText("暂停");
+                searchPauseButton.setText(getString("button.pause"));
                 searchStopButton.setEnabled(false);
                 searchResetButton.setEnabled(true);
                 searchSeedField.setEnabled(true);
@@ -439,10 +496,13 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 maxXField.setEnabled(true);
                 minZField.setEnabled(true);
                 maxZField.setEnabled(true);
+                if (languageComboBox != null) {
+                    languageComboBox.setEnabled(true);
+                }
                 searchResultArea.setText("");
                 searchProgressBar.setValue(0);
-                searchProgressBar.setString("进度: 0/0 (0.00%)");
-                searchRemainingTimeLabel.setText("剩余时间: 已重置（参数已更改）");
+                searchProgressBar.setString(getString("progress.initial"));
+                searchRemainingTimeLabel.setText(getString("remainingTime.reset"));
             }
         } catch (NumberFormatException e) {
             // 忽略无效输入
@@ -460,7 +520,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             // 尝试解析为double，检查是否为整数
             double value = Double.parseDouble(text);
             if (value != Math.floor(value)) {
-                JOptionPane.showMessageDialog(this, fieldName + "必须为整数", "输入错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("validation.integerRequired", fieldName), getString("prompt.inputError"), JOptionPane.ERROR_MESSAGE);
                 field.requestFocus();
             }
         } catch (NumberFormatException e) {
@@ -485,7 +545,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             if (line.isEmpty()) {
                 continue;
             }
-            // 格式：/tp x 50 y (差值: dx=?, dz=?)
+            // 格式：/tp x 50 y (dx=?, dz=?)
             if (line.startsWith("/tp ")) {
                 try {
                     // 提取坐标：/tp x 50 y
@@ -536,7 +596,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 String threadText = searchThreadCountField.getText().trim();
                 int threadCount = Integer.parseInt(threadText);
                 if (threadCount < 1) {
-                    JOptionPane.showMessageDialog(this, "线程数必须大于0", "错误", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(this, getString("error.threadCountRequired"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                     return;
                 }
                 
@@ -545,8 +605,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 if (threadCount > cpuThreads) {
                     int result = JOptionPane.showConfirmDialog(
                         this,
-                        "线程数超过CPU核数（" + cpuThreads + "），是否自动调整为" + cpuThreads + "？",
-                        "提示",
+                        getString("error.threadCountExceedsCPU", cpuThreads, cpuThreads),
+                        getString("prompt.adjustThreadCount"),
                         JOptionPane.YES_NO_OPTION,
                         JOptionPane.QUESTION_MESSAGE
                     );
@@ -562,11 +622,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 if (threadCount != lastSearchThreadCount) {
                     // 获取其他参数
                     String selectedVersion = (String) versionComboBox.getSelectedItem();
-                    MCVersion mcVersion = getMCVersion(selectedVersion != null ? selectedVersion : "1.21.1");
-                    
-                    // 如果版本变化，需要重新创建searcher
-                    if (searcher == null || !searcher.getMCVersion().equals(mcVersion)) {
-                        searcher = new SearchMonument(mcVersion);
+                    int mc = MonumentFinderBridge.mcFromVersionString(
+                            selectedVersion != null ? selectedVersion : "1.21.1");
+
+                    if (searcher == null || searcher.getMc() != mc) {
+                        searcher = new MonumentSearchRunner(mc);
                     }
                     
                     // 调用startSearch，它会检测到暂停状态并调整线程数
@@ -579,25 +639,23 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     
                     boolean pauseOnPairFound = pauseOnPairFoundCheckBox.isSelected();
                     searcher.startSearch(seed, threadCount, minX, maxX, minZ, maxZ, 
-                            this::updateSearchProgress, this::addSearchResult, pauseOnPairFound);
+                            this::updateSearchProgress, this::addSearchResult, pauseOnPairFound,
+                            this::formatPairResult, nativeErrorMessage());
                     
                     lastSearchThreadCount = threadCount;
-                    searchPauseButton.setText("暂停");
+                    searchPauseButton.setText(getString("button.pause"));
                     searchThreadCountField.setEnabled(false);
                     return;
                 } else {
                     // 线程数没变化，直接恢复
                     searcher.resume();
                     isSearchPaused = false;
-                    searchPauseButton.setText("暂停");
+                    searchPauseButton.setText(getString("button.pause"));
                     searchThreadCountField.setEnabled(false);
                     return;
                 }
             } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, 
-                    "线程数格式错误，无法继续", 
-                    "错误", 
-                    JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.threadCountContinueError"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
             }
         }
@@ -606,7 +664,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             // 验证种子
             String seedText = searchSeedField.getText().trim();
             if (seedText.isEmpty()) {
-                JOptionPane.showMessageDialog(this, "请输入种子值", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.seedRequired"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
@@ -615,11 +673,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             try {
                 seedDouble = Double.parseDouble(seedText);
                 if (seedDouble != Math.floor(seedDouble)) {
-                    JOptionPane.showMessageDialog(this, "种子必须为整数", "错误", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(this, getString("error.seedMustBeInteger"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                     return;
                 }
             } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, "种子格式错误，请输入整数", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.seedFormatError"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
@@ -628,7 +686,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             try {
                 seed = Long.parseLong(seedText);
             } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, "种子值超出范围（绝对值不能超过2^63-1）", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.seedOutOfRange"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
@@ -638,17 +696,17 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             try {
                 threadDouble = Double.parseDouble(threadText);
                 if (threadDouble != Math.floor(threadDouble)) {
-                    JOptionPane.showMessageDialog(this, "线程数必须为整数", "错误", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(this, getString("error.threadCountMustBeInteger"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                     return;
                 }
             } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, "线程数格式错误，请输入整数", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.threadCountFormatError"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
             int threadCount = (int) threadDouble;
             if (threadCount < 1) {
-                JOptionPane.showMessageDialog(this, "线程数必须大于0", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.threadCountRequired"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
@@ -657,8 +715,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             if (threadCount > cpuThreads) {
                 int result = JOptionPane.showConfirmDialog(
                     this,
-                    "线程数超过CPU核数（" + cpuThreads + "），是否自动调整为" + cpuThreads + "？",
-                    "提示",
+                    getString("error.threadCountExceedsCPU", cpuThreads, cpuThreads),
+                    getString("prompt.adjustThreadCount"),
                     JOptionPane.YES_NO_OPTION,
                     JOptionPane.QUESTION_MESSAGE
                 );
@@ -681,12 +739,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             try {
                 minXDouble = Double.parseDouble(minXText);
                 if (minXDouble != Math.floor(minXDouble)) {
-                    JOptionPane.showMessageDialog(this, "MinX必须为整数，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(this, getString("error.minXMustBeInteger"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                     minXField.setText(String.valueOf(DEFAULT_MIN_X));
                     return;
                 }
             } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, "MinX格式错误，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.minXFormatError"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 minXField.setText(String.valueOf(DEFAULT_MIN_X));
                 return;
             }
@@ -694,12 +752,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             try {
                 maxXDouble = Double.parseDouble(maxXText);
                 if (maxXDouble != Math.floor(maxXDouble)) {
-                    JOptionPane.showMessageDialog(this, "MaxX必须为整数，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(this, getString("error.maxXMustBeInteger"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                     maxXField.setText(String.valueOf(DEFAULT_MAX_X));
                     return;
                 }
             } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, "MaxX格式错误，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.maxXFormatError"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 maxXField.setText(String.valueOf(DEFAULT_MAX_X));
                 return;
             }
@@ -707,12 +765,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             try {
                 minZDouble = Double.parseDouble(minZText);
                 if (minZDouble != Math.floor(minZDouble)) {
-                    JOptionPane.showMessageDialog(this, "MinZ必须为整数，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(this, getString("error.minZMustBeInteger"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                     minZField.setText(String.valueOf(DEFAULT_MIN_Z));
                     return;
                 }
             } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, "MinZ格式错误，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.minZFormatError"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 minZField.setText(String.valueOf(DEFAULT_MIN_Z));
                 return;
             }
@@ -720,12 +778,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             try {
                 maxZDouble = Double.parseDouble(maxZText);
                 if (maxZDouble != Math.floor(maxZDouble)) {
-                    JOptionPane.showMessageDialog(this, "MaxZ必须为整数，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(this, getString("error.maxZMustBeInteger"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                     maxZField.setText(String.valueOf(DEFAULT_MAX_Z));
                     return;
                 }
             } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, "MaxZ格式错误，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.maxZFormatError"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 maxZField.setText(String.valueOf(DEFAULT_MAX_Z));
                 return;
             }
@@ -736,12 +794,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             int maxZ = (int) maxZDouble;
             
             if (minX >= maxX) {
-                JOptionPane.showMessageDialog(this, "MinX 必须小于 MaxX", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.minXGreaterThanMaxX"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
             if (minZ >= maxZ) {
-                JOptionPane.showMessageDialog(this, "MinZ 必须小于 MaxZ", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.minZGreaterThanMaxZ"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
@@ -751,8 +809,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             if (outOfBounds) {
                 int result = JOptionPane.showConfirmDialog(
                     this,
-                    "输入的值超出世界边界，搜索出的神殿可能无法抵达，是否继续？",
-                    "警告",
+                    getString("error.outOfBounds"),
+                    getString("prompt.warning"),
                     JOptionPane.YES_NO_OPTION,
                     JOptionPane.WARNING_MESSAGE
                 );
@@ -773,33 +831,38 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             isSearchPaused = false;
             searchStartButton.setEnabled(false);
             searchPauseButton.setEnabled(true);
-            searchPauseButton.setText("暂停");
+            searchPauseButton.setText(getString("button.pause"));
             searchStopButton.setEnabled(true);
             searchResetButton.setEnabled(false);
             searchSeedField.setEnabled(false);
             searchThreadCountField.setEnabled(false); // 运行中不能修改，暂停时可以修改
             versionComboBox.setEnabled(false);
             pauseOnPairFoundCheckBox.setEnabled(false);
+            if (languageComboBox != null) {
+                languageComboBox.setEnabled(false);
+            }
             minXField.setEnabled(false);
             maxXField.setEnabled(false);
             minZField.setEnabled(false);
             maxZField.setEnabled(false);
             searchResultArea.setText("");
             searchProgressBar.setValue(0);
-            searchProgressBar.setString("进度: 0/0 (0.00%)");
-            searchElapsedTimeLabel.setText("已过时间: 0天 0时 0分 0秒");
-            searchRemainingTimeLabel.setText("剩余时间: 计算中...");
+            searchProgressBar.setString(getString("progress.initial"));
+            searchElapsedTimeLabel.setText(getString("elapsedTime.initial"));
+            searchRemainingTimeLabel.setText(getString("remainingTime.calculating"));
 
             // 获取选择的版本
             String selectedVersion = (String) versionComboBox.getSelectedItem();
-            MCVersion mcVersion = getMCVersion(selectedVersion != null ? selectedVersion : "1.21.1");
+            int mc = MonumentFinderBridge.mcFromVersionString(
+                    selectedVersion != null ? selectedVersion : "1.21.1");
 
-            searcher = new SearchMonument(mcVersion);
+            searcher = new MonumentSearchRunner(mc);
             boolean pauseOnPairFound = pauseOnPairFoundCheckBox.isSelected();
-            searcher.startSearch(seed, threadCount, minX, maxX, minZ, maxZ, this::updateSearchProgress, this::addSearchResult, pauseOnPairFound);
+            searcher.startSearch(seed, threadCount, minX, maxX, minZ, maxZ, this::updateSearchProgress, this::addSearchResult, pauseOnPairFound,
+                            this::formatPairResult, nativeErrorMessage());
 
         } catch (NumberFormatException e) {
-            JOptionPane.showMessageDialog(this, "请输入有效的数字", "错误", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, getString("error.invalidNumber"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -812,13 +875,13 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             // 恢复（线程数变化会在startSearch中处理）
             searcher.resume();
             isSearchPaused = false;
-            searchPauseButton.setText("暂停");
+            searchPauseButton.setText(getString("button.pause"));
             searchThreadCountField.setEnabled(false); // 恢复后不能修改线程数
         } else {
             // 暂停
             searcher.pause();
             isSearchPaused = true;
-            searchPauseButton.setText("继续");
+            searchPauseButton.setText(getString("button.resume"));
             searchThreadCountField.setEnabled(true); // 暂停时可以修改线程数
         }
     }
@@ -831,7 +894,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         isSearchPaused = false;
         searchStartButton.setEnabled(true);
         searchPauseButton.setEnabled(false);
-        searchPauseButton.setText("暂停");
+        searchPauseButton.setText(getString("button.pause"));
         searchStopButton.setEnabled(false);
         searchResetButton.setEnabled(true);
         searchSeedField.setEnabled(true);
@@ -842,7 +905,10 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         maxXField.setEnabled(true);
         minZField.setEnabled(true);
         maxZField.setEnabled(true);
-        searchRemainingTimeLabel.setText("剩余时间: 已停止");
+        if (languageComboBox != null) {
+            languageComboBox.setEnabled(true);
+        }
+        searchRemainingTimeLabel.setText(getString("remainingTime.stopped"));
     }
 
     private void resetSearchToDefaults() {
@@ -852,25 +918,25 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         maxZField.setText(String.valueOf(DEFAULT_MAX_Z));
     }
 
-    private void updateSearchProgress(SearchMonument.ProgressInfo info) {
+    private void updateSearchProgress(MonumentSearchRunner.ProgressInfo info) {
         SwingUtilities.invokeLater(() -> {
             if (!isSearchRunning) return;
 
             int progress = (int) Math.min(100, info.percentage);
             searchProgressBar.setValue(progress);
             // 将进度信息显示在进度条中
-            searchProgressBar.setString(String.format("进度: %d/%d (%.2f%%)", info.processed, info.total, info.percentage));
+            searchProgressBar.setString(getString("progress.format", info.processed, info.total, info.percentage));
             
             // 暂停时不更新时间
             if (!isSearchPaused) {
-                searchElapsedTimeLabel.setText("已过时间: " + formatTime(info.elapsedMs));
+                searchElapsedTimeLabel.setText(getString("elapsedTime", formatTime(info.elapsedMs)));
                 if (info.remainingMs > 0) {
-                    searchRemainingTimeLabel.setText("剩余时间: " + formatTime(info.remainingMs));
+                    searchRemainingTimeLabel.setText(getString("remainingTime", formatTime(info.remainingMs)));
                 } else {
-                    searchRemainingTimeLabel.setText("剩余时间: 计算中...");
+                    searchRemainingTimeLabel.setText(getString("remainingTime.calculating"));
                 }
             } else {
-                searchRemainingTimeLabel.setText("剩余时间: 已暂停");
+                searchRemainingTimeLabel.setText(getString("remainingTime.paused"));
             }
 
             if (info.processed >= info.total) {
@@ -878,20 +944,22 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 isSearchPaused = false;
                 searchStartButton.setEnabled(true);
                 searchPauseButton.setEnabled(false);
-                searchPauseButton.setText("暂停");
+                searchPauseButton.setText(getString("button.pause"));
                 searchStopButton.setEnabled(false);
                 searchResetButton.setEnabled(true);
                 searchSeedField.setEnabled(true);
                 searchThreadCountField.setEnabled(true);
                 versionComboBox.setEnabled(true);
                 pauseOnPairFoundCheckBox.setEnabled(true);
+                if (languageComboBox != null) {
+                    languageComboBox.setEnabled(true);
+                }
                 minXField.setEnabled(true);
                 maxXField.setEnabled(true);
                 minZField.setEnabled(true);
                 maxZField.setEnabled(true);
-                // 不再弹框，只在进度条中显示完成
-                searchProgressBar.setString(String.format("进度: %d/%d (100.00%%) - 完成", info.processed, info.total));
-                searchRemainingTimeLabel.setText("剩余时间: 已完成");
+                searchProgressBar.setString(getString("progress.complete", info.processed, info.total));
+                searchRemainingTimeLabel.setText(getString("remainingTime.completed"));
             }
         });
     }
@@ -905,23 +973,23 @@ public class DoubleMonumentForFixedSeed extends JFrame {
 
     private void exportSearchResults() {
         if (searchResultArea.getText().trim().isEmpty()) {
-            JOptionPane.showMessageDialog(this, "没有结果可导出", "提示", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(this, getString("error.noResultsToExport"), getString("prompt.information"), JOptionPane.INFORMATION_MESSAGE);
             return;
         }
 
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("导出搜索结果");
-        fileChooser.setFileFilter(new FileNameExtensionFilter("文本文件 (*.txt)", "txt"));
-        fileChooser.setSelectedFile(new File("search_output.txt"));
+        fileChooser.setDialogTitle(getString("dialog.exportResults"));
+        fileChooser.setFileFilter(new FileNameExtensionFilter(getString("dialog.textFiles"), "txt"));
+        fileChooser.setSelectedFile(new File(getString("file.searchOutput")));
 
         int result = fileChooser.showSaveDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
             File file = fileChooser.getSelectedFile();
             try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(file), "UTF-8"))) {
                 writer.print(searchResultArea.getText());
-                JOptionPane.showMessageDialog(this, "导出成功！", "成功", JOptionPane.INFORMATION_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("success.export"), getString("prompt.success"), JOptionPane.INFORMATION_MESSAGE);
             } catch (IOException e) {
-                JOptionPane.showMessageDialog(this, "导出失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.exportFailed", e.getMessage()), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
             }
         }
     }
@@ -933,7 +1001,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         long hours = (totalSeconds % 86400) / 3600;
         long minutes = (totalSeconds % 3600) / 60;
         long seconds = totalSeconds % 60;
-        return String.format("%d天 %d时 %d分 %d秒", days, hours, minutes, seconds);
+        return getString("time.format", days, hours, minutes, seconds);
     }
 
     /**
@@ -1022,22 +1090,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         return new Font(Font.SANS_SERIF, Font.PLAIN, 12);
     }
     
-    /**
-     * 将版本字符串转换为 MCVersion
-     */
-    private MCVersion getMCVersion(String versionString) {
-        switch (versionString) {
-            case "1.18.2":
-                return MCVersion.v1_18_2;
-            case "1.19.2":
-                return MCVersion.v1_19_2;
-            case "1.20.1":
-                return MCVersion.v1_20_1;
-            case "1.21.1":
-            default:
-                return MCVersion.v1_21;
-        }
-    }
 
     // 创建批量搜索面板（第二个tab）
     private JPanel createBatchSearchPanel() {
@@ -1058,13 +1110,13 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.gridy = 0;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        JLabel seedFileLabel = new JLabel("种子文件:");
-        seedFileLabel.setFont(getLoadedFont());
-        inputPanel.add(seedFileLabel, gbc);
+        batchSeedFileTitleLabel = new JLabel(getString("label.seedFile"));
+        batchSeedFileTitleLabel.setFont(getLoadedFont());
+        inputPanel.add(batchSeedFileTitleLabel, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
-        batchImportButton = new JButton("选择文件");
+        batchImportButton = new JButton(getString("button.selectFile"));
         batchImportButton.setFont(getLoadedFont());
         batchImportButton.addActionListener(e -> importSeedFile());
         inputPanel.add(batchImportButton, gbc);
@@ -1074,7 +1126,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
         gbc.gridwidth = 2;
-        batchSeedFileLabel = new JLabel("未选择文件");
+        batchSeedFileLabel = new JLabel(getString("label.noFileSelected"));
         batchSeedFileLabel.setFont(getLoadedFont());
         inputPanel.add(batchSeedFileLabel, gbc);
         gbc.gridwidth = 1;
@@ -1084,16 +1136,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.gridy = 2;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        JLabel threadLabel = new JLabel("线程数:");
-        threadLabel.setFont(getLoadedFont());
-        inputPanel.add(threadLabel, gbc);
+        batchThreadCountLabel = new JLabel(getString("label.threadCount"));
+        batchThreadCountLabel.setFont(getLoadedFont());
+        inputPanel.add(batchThreadCountLabel, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
         batchThreadCountField = new JTextField(String.valueOf(DEFAULT_THREAD_COUNT), 20);
         batchThreadCountField.addFocusListener(new java.awt.event.FocusAdapter() {
             public void focusLost(java.awt.event.FocusEvent e) {
-                validateIntegerInput(batchThreadCountField, "线程数");
+                validateIntegerInput(batchThreadCountField, getString("label.field.threadCount"));
             }
         });
         inputPanel.add(batchThreadCountField, gbc);
@@ -1103,9 +1155,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.gridy = 3;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        JLabel versionLabel = new JLabel("版本:");
-        versionLabel.setFont(getLoadedFont());
-        inputPanel.add(versionLabel, gbc);
+        batchVersionLabel = new JLabel(getString("label.mcVersion"));
+        batchVersionLabel.setFont(getLoadedFont());
+        inputPanel.add(batchVersionLabel, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
@@ -1119,16 +1171,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.gridy = 4;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        JLabel minXLabel = new JLabel("MinX(x512):");
-        minXLabel.setFont(getLoadedFont());
-        inputPanel.add(minXLabel, gbc);
+        batchMinXLabel = new JLabel(getString("label.minX"));
+        batchMinXLabel.setFont(getLoadedFont());
+        inputPanel.add(batchMinXLabel, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
         batchMinXField = new JTextField(String.valueOf(BATCH_DEFAULT_MIN_X), 20);
         batchMinXField.addFocusListener(new java.awt.event.FocusAdapter() {
             public void focusLost(java.awt.event.FocusEvent e) {
-                validateIntegerInput(batchMinXField, "MinX");
+                validateIntegerInput(batchMinXField, getString("label.minX").replace(":", ""));
             }
         });
         inputPanel.add(batchMinXField, gbc);
@@ -1138,16 +1190,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.gridy = 5;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        JLabel maxXLabel = new JLabel("MaxX(x512):");
-        maxXLabel.setFont(getLoadedFont());
-        inputPanel.add(maxXLabel, gbc);
+        batchMaxXLabel = new JLabel(getString("label.maxX"));
+        batchMaxXLabel.setFont(getLoadedFont());
+        inputPanel.add(batchMaxXLabel, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
         batchMaxXField = new JTextField(String.valueOf(BATCH_DEFAULT_MAX_X), 20);
         batchMaxXField.addFocusListener(new java.awt.event.FocusAdapter() {
             public void focusLost(java.awt.event.FocusEvent e) {
-                validateIntegerInput(batchMaxXField, "MaxX");
+                validateIntegerInput(batchMaxXField, getString("label.maxX").replace(":", ""));
             }
         });
         inputPanel.add(batchMaxXField, gbc);
@@ -1157,16 +1209,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.gridy = 6;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        JLabel minZLabel = new JLabel("MinZ(x512):");
-        minZLabel.setFont(getLoadedFont());
-        inputPanel.add(minZLabel, gbc);
+        batchMinZLabel = new JLabel(getString("label.minZ"));
+        batchMinZLabel.setFont(getLoadedFont());
+        inputPanel.add(batchMinZLabel, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
         batchMinZField = new JTextField(String.valueOf(BATCH_DEFAULT_MIN_Z), 20);
         batchMinZField.addFocusListener(new java.awt.event.FocusAdapter() {
             public void focusLost(java.awt.event.FocusEvent e) {
-                validateIntegerInput(batchMinZField, "MinZ");
+                validateIntegerInput(batchMinZField, getString("label.minZ").replace(":", ""));
             }
         });
         inputPanel.add(batchMinZField, gbc);
@@ -1176,26 +1228,26 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.gridy = 7;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        JLabel maxZLabel = new JLabel("MaxZ(x512):");
-        maxZLabel.setFont(getLoadedFont());
-        inputPanel.add(maxZLabel, gbc);
+        batchMaxZLabel = new JLabel(getString("label.maxZ"));
+        batchMaxZLabel.setFont(getLoadedFont());
+        inputPanel.add(batchMaxZLabel, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
         batchMaxZField = new JTextField(String.valueOf(BATCH_DEFAULT_MAX_Z), 20);
         batchMaxZField.addFocusListener(new java.awt.event.FocusAdapter() {
             public void focusLost(java.awt.event.FocusEvent e) {
-                validateIntegerInput(batchMaxZField, "MaxZ");
+                validateIntegerInput(batchMaxZField, getString("label.maxZ").replace(":", ""));
             }
         });
         inputPanel.add(batchMaxZField, gbc);
 
         // 按钮区域
         JPanel buttonPanel = new JPanel(new FlowLayout());
-        batchStartButton = new JButton("开始搜索");
-        batchPauseButton = new JButton("暂停");
-        batchStopButton = new JButton("停止");
-        batchResetButton = new JButton("重置搜索区域");
+        batchStartButton = new JButton(getString("button.startSearch"));
+        batchPauseButton = new JButton(getString("button.pause"));
+        batchStopButton = new JButton(getString("button.stop"));
+        batchResetButton = new JButton(getString("button.reset"));
         batchPauseButton.setEnabled(false);
         batchStopButton.setEnabled(false);
         buttonPanel.add(batchStartButton);
@@ -1206,9 +1258,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         // 静态文字展示区域（放在按钮上方）
         JPanel creditPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
         creditPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        JLabel creditLabel = new JLabel("<html><div style='text-align: center;'><br><br><br><br><br><br><br>作者：b站@SunnySlopes<br>字体：江城黑体</div></html>");
-        creditLabel.setFont(getLoadedFont());
-        creditPanel.add(creditLabel);
+        batchCreditLabel = new JLabel(getString("credit.text"));
+        batchCreditLabel.setFont(getLoadedFont());
+        creditPanel.add(batchCreditLabel);
 
         // 将 credit 和按钮放在一个容器中，credit 在上，按钮在下
         JPanel creditButtonPanel = new JPanel(new BorderLayout());
@@ -1228,16 +1280,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         pgc.gridwidth = 2;
         batchProgressBar = new JProgressBar(0, 100);
         batchProgressBar.setStringPainted(true);
-        batchProgressBar.setString("进度: 0/0 (0.00%)");
+        batchProgressBar.setString(getString("progress.initial"));
         progressPanel.add(batchProgressBar, pgc);
 
         pgc.gridwidth = 1;
         pgc.gridy = 1;
-        batchElapsedTimeLabel = new JLabel("已过时间: 0天 0时 0分 0秒");
+        batchElapsedTimeLabel = new JLabel(getString("elapsedTime.initial"));
         progressPanel.add(batchElapsedTimeLabel, pgc);
 
         pgc.gridy = 3;
-        batchRemainingTimeLabel = new JLabel("剩余时间: 计算中...");
+        batchRemainingTimeLabel = new JLabel(getString("remainingTime.calculating"));
         progressPanel.add(batchRemainingTimeLabel, pgc);
 
         leftPanel.add(inputPanel, BorderLayout.NORTH);
@@ -1252,28 +1304,28 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         leftContainer.add(leftBottomPanel, BorderLayout.SOUTH);
 
         // 右侧：结果显示
-        JPanel rightPanel = new JPanel(new BorderLayout());
-        rightPanel.setBorder(BorderFactory.createTitledBorder("检查结果(输出格式: /tp x 50 z (差值: dx=?, dz=?))"));
+        batchRightPanel = new JPanel(new BorderLayout());
+        batchRightPanel.setBorder(BorderFactory.createTitledBorder(getString("result.border")));
         batchResultArea = new JTextArea();
         batchResultArea.setEditable(false);
         batchResultArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         JScrollPane scrollPane = new JScrollPane(batchResultArea);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
         JPanel exportSortPanel = new JPanel(new FlowLayout());
-        batchExportFullButton = new JButton("导出完整结果");
+        batchExportFullButton = new JButton(getString("button.exportFull"));
         batchExportFullButton.addActionListener(e -> exportBatchResults(true));
-        batchExportSeedsButton = new JButton("导出种子列表");
+        batchExportSeedsButton = new JButton(getString("button.exportSeeds"));
         batchExportSeedsButton.addActionListener(e -> exportBatchResults(false));
-        batchSortButton = new JButton("排序");
+        batchSortButton = new JButton(getString("button.sort"));
         batchSortButton.addActionListener(e -> sortBatchResults());
         exportSortPanel.add(batchExportFullButton);
         exportSortPanel.add(batchExportSeedsButton);
         exportSortPanel.add(batchSortButton);
-        rightPanel.add(scrollPane, BorderLayout.CENTER);
-        rightPanel.add(exportSortPanel, BorderLayout.SOUTH);
+        batchRightPanel.add(scrollPane, BorderLayout.CENTER);
+        batchRightPanel.add(exportSortPanel, BorderLayout.SOUTH);
 
         // 使用 JSplitPane 分割
-        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftContainer, rightPanel);
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftContainer, batchRightPanel);
         splitPane.setDividerLocation(450);
         splitPane.setResizeWeight(0.5);
 
@@ -1291,8 +1343,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     // 导入种子文件
     private void importSeedFile() {
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("选择种子文件");
-        fileChooser.setFileFilter(new FileNameExtensionFilter("文本文件 (*.txt)", "txt"));
+        fileChooser.setDialogTitle(getString("dialog.selectSeedFile"));
+        fileChooser.setFileFilter(new FileNameExtensionFilter(getString("dialog.textFiles"), "txt"));
         
         int result = fileChooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
@@ -1317,10 +1369,10 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 }
                 reader.close();
                 batchSeedFileName = file.getName();
-                batchSeedFileLabel.setText("已选择: " + batchSeedFileName + " (" + batchSeedList.size() + " 个种子)");
-                JOptionPane.showMessageDialog(this, "成功导入 " + batchSeedList.size() + " 个种子", "成功", JOptionPane.INFORMATION_MESSAGE);
+                batchSeedFileLabel.setText(getString("label.seedFileSelected", batchSeedFileName, batchSeedList.size()));
+                JOptionPane.showMessageDialog(this, getString("success.importSeeds", batchSeedList.size()), getString("prompt.success"), JOptionPane.INFORMATION_MESSAGE);
             } catch (IOException e) {
-                JOptionPane.showMessageDialog(this, "读取文件失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.seedFileReadFailed", e.getMessage()), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
             }
         }
     }
@@ -1328,7 +1380,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     // 开始批量搜索
     private void startBatchSearch() {
         if (batchSeedList.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "请先导入种子文件", "错误", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, getString("error.seedFileRequired"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
             return;
         }
         
@@ -1339,17 +1391,17 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             try {
                 threadDouble = Double.parseDouble(threadText);
                 if (threadDouble != Math.floor(threadDouble)) {
-                    JOptionPane.showMessageDialog(this, "线程数必须为整数", "错误", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(this, getString("error.threadCountMustBeInteger"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                     return;
                 }
             } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, "线程数格式错误，请输入整数", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.threadCountFormatError"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
             int threadCount = (int) threadDouble;
             if (threadCount < 1) {
-                JOptionPane.showMessageDialog(this, "线程数必须大于0", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.threadCountRequired"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
@@ -1358,8 +1410,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             if (threadCount > cpuThreads) {
                 int result = JOptionPane.showConfirmDialog(
                     this,
-                    "线程数超过CPU核数（" + cpuThreads + "），是否自动调整为" + cpuThreads + "？",
-                    "提示",
+                    getString("error.threadCountExceedsCPU", cpuThreads, cpuThreads),
+                    getString("prompt.adjustThreadCount"),
                     JOptionPane.YES_NO_OPTION,
                     JOptionPane.QUESTION_MESSAGE
                 );
@@ -1382,12 +1434,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             try {
                 minXDouble = Double.parseDouble(minXText);
                 if (minXDouble != Math.floor(minXDouble)) {
-                    JOptionPane.showMessageDialog(this, "MinX必须为整数，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(this, getString("error.minXMustBeInteger"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                     batchMinXField.setText(String.valueOf(BATCH_DEFAULT_MIN_X));
                     return;
                 }
             } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, "MinX格式错误，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.minXFormatError"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 batchMinXField.setText(String.valueOf(BATCH_DEFAULT_MIN_X));
                 return;
             }
@@ -1395,12 +1447,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             try {
                 maxXDouble = Double.parseDouble(maxXText);
                 if (maxXDouble != Math.floor(maxXDouble)) {
-                    JOptionPane.showMessageDialog(this, "MaxX必须为整数，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(this, getString("error.maxXMustBeInteger"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                     batchMaxXField.setText(String.valueOf(BATCH_DEFAULT_MAX_X));
                     return;
                 }
             } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, "MaxX格式错误，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.maxXFormatError"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 batchMaxXField.setText(String.valueOf(BATCH_DEFAULT_MAX_X));
                 return;
             }
@@ -1408,12 +1460,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             try {
                 minZDouble = Double.parseDouble(minZText);
                 if (minZDouble != Math.floor(minZDouble)) {
-                    JOptionPane.showMessageDialog(this, "MinZ必须为整数，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(this, getString("error.minZMustBeInteger"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                     batchMinZField.setText(String.valueOf(BATCH_DEFAULT_MIN_Z));
                     return;
                 }
             } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, "MinZ格式错误，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.minZFormatError"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 batchMinZField.setText(String.valueOf(BATCH_DEFAULT_MIN_Z));
                 return;
             }
@@ -1421,12 +1473,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             try {
                 maxZDouble = Double.parseDouble(maxZText);
                 if (maxZDouble != Math.floor(maxZDouble)) {
-                    JOptionPane.showMessageDialog(this, "MaxZ必须为整数，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(this, getString("error.maxZMustBeInteger"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                     batchMaxZField.setText(String.valueOf(BATCH_DEFAULT_MAX_Z));
                     return;
                 }
             } catch (NumberFormatException e) {
-                JOptionPane.showMessageDialog(this, "MaxZ格式错误，已重置为默认值", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.maxZFormatError"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 batchMaxZField.setText(String.valueOf(BATCH_DEFAULT_MAX_Z));
                 return;
             }
@@ -1437,19 +1489,20 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             int maxZ = (int) maxZDouble;
             
             if (minX >= maxX) {
-                JOptionPane.showMessageDialog(this, "MinX 必须小于 MaxX", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.minXGreaterThanMaxX"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
             if (minZ >= maxZ) {
-                JOptionPane.showMessageDialog(this, "MinZ 必须小于 MaxZ", "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.minZGreaterThanMaxZ"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
             // 获取选择的版本
             String selectedVersion = (String) batchVersionComboBox.getSelectedItem();
-            MCVersion mcVersion = getMCVersion(selectedVersion != null ? selectedVersion : "1.21.1");
-            
+            int mc = MonumentFinderBridge.mcFromVersionString(
+                    selectedVersion != null ? selectedVersion : "1.21.1");
+
             // 创建final副本用于lambda表达式
             final int finalThreadCount = threadCount;
             final int finalMinX = minX;
@@ -1462,7 +1515,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             isBatchSearchPaused = false;
             batchStartButton.setEnabled(false);
             batchPauseButton.setEnabled(true);
-            batchPauseButton.setText("暂停");
+            batchPauseButton.setText(getString("button.pause"));
             batchStopButton.setEnabled(true);
             batchResetButton.setEnabled(false);
             batchImportButton.setEnabled(false);
@@ -1474,9 +1527,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             batchMaxZField.setEnabled(false);
             batchResultArea.setText("");
             batchProgressBar.setValue(0);
-            batchProgressBar.setString("进度: 0/" + batchSeedList.size() + " (0.00%)");
-            batchElapsedTimeLabel.setText("已过时间: 0天 0时 0分 0秒");
-            batchRemainingTimeLabel.setText("剩余时间: 计算中...");
+            batchProgressBar.setString(getString("progress.total", 0, batchSeedList.size(), 0.0));
+            batchElapsedTimeLabel.setText(getString("elapsedTime.initial"));
+            batchRemainingTimeLabel.setText(getString("remainingTime.calculating"));
             
             // 在新线程中执行批量搜索
             new Thread(() -> {
@@ -1490,52 +1543,61 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     }
                     
                     // 为每个种子创建搜索器
-                    SearchMonument batchSearcher = new SearchMonument(mcVersion);
+                    MonumentSearchRunner batchSearcher = new MonumentSearchRunner(mc);
                     synchronized (this) {
                         currentBatchSearcher = batchSearcher;
                     }
                     final long currentSeed = seed;
                     
-                    // 执行搜索
-                    final List<String> seedResultStrings = new ArrayList<>();
-                    batchSearcher.startSearch(seed, finalThreadCount, finalMinX, finalMaxX, finalMinZ, finalMaxZ,
-                        null, // 不显示单个种子的进度
-                        result -> {
-                            synchronized (seedResultStrings) {
-                                seedResultStrings.add(result);
-                            }
-                        },
-                        false // 不暂停
-                    );
-                    
-                    // 等待搜索完成
-                    while (batchSearcher.isRunning()) {
-                        // 检查暂停状态
+                    // 在独立线程中阻塞执行搜索，主循环 join 等待（避免 isRunning 竞态导致立即跳过）
+                    final MonumentSearchRunner searcherForSeed = batchSearcher;
+                    Thread seedSearchThread = new Thread(
+                            () -> searcherForSeed.runSearchBlocking(
+                                    seed,
+                                    finalThreadCount,
+                                    finalMinX,
+                                    finalMaxX,
+                                    finalMinZ,
+                                    finalMaxZ,
+                                    null,
+                                    null,
+                                    false,
+                                    this::formatPairResult,
+                                    nativeErrorMessage()),
+                            "batch-monument-seed-" + seed);
+                    seedSearchThread.setDaemon(true);
+                    seedSearchThread.start();
+
+                    while (seedSearchThread.isAlive()) {
+                        if (!isBatchSearchRunning) {
+                            batchSearcher.stop();
+                        }
                         if (isBatchSearchPaused) {
                             batchSearcher.pause();
                         } else {
                             batchSearcher.resume();
                         }
-                        
-                        // 暂停时等待
-                        while (isBatchSearchPaused && isBatchSearchRunning) {
+
+                        while (isBatchSearchPaused && isBatchSearchRunning && seedSearchThread.isAlive()) {
                             try {
                                 Thread.sleep(100);
                             } catch (InterruptedException e) {
                                 Thread.currentThread().interrupt();
+                                batchSearcher.stop();
                                 return;
                             }
                         }
-                        
+
                         if (!isBatchSearchRunning) {
                             batchSearcher.stop();
                             break;
                         }
-                        
+
                         try {
-                            Thread.sleep(100);
+                            seedSearchThread.join(100);
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
+                            batchSearcher.stop();
                             return;
                         }
                     }
@@ -1552,15 +1614,15 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     
                     for (String resultStr : allResults) {
                         // 解析结果字符串
-                        // 格式: /tp x 50 z (差值: dx=?, dz=?) 或带后缀
+                        // 格式: /tp x 50 z (dx=?, dz=?) 或带后缀
                         String[] parts = resultStr.split("\\s+");
                         if (parts.length >= 4 && parts[0].equals("/tp")) {
                             try {
                                 int centerX = Integer.parseInt(parts[1]);
                                 int centerZ = Integer.parseInt(parts[3]);
-                                // 从差值中提取dx和dz
+                                // 提取dx和dz
                                 int dx = 0, dz = 0;
-                                boolean isLowEfficiency = resultStr.contains("效率会略微损失");
+                                boolean isLowEfficiency = resultStr.contains("效率") || resultStr.toLowerCase().contains("efficiency");
                                 
                                 // 查找dx和dz
                                 for (int i = 0; i < parts.length; i++) {
@@ -1601,11 +1663,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                         SwingUtilities.invokeLater(() -> {
                             batchResultArea.append(String.valueOf(currentSeed) + "\n");
                             for (ResultItem item : finalResults) {
-                                String resultLine = String.format("/tp %d 50 %d (差值: dx=%d, dz=%d)",
-                                    item.centerX, item.centerZ, item.dx, item.dz);
-                                if (item.isLowEfficiency) {
-                                    resultLine += " - 效率会略微损失";
-                                }
+                                String resultLine = formatPairResult(item.centerX, item.centerZ, item.dx, item.dz, item.isLowEfficiency);
                                 batchResultArea.append(resultLine + "\n");
                             }
                         });
@@ -1619,13 +1677,13 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     SwingUtilities.invokeLater(() -> {
                         double percentage = (double) currentProcessed / total * 100.0;
                         batchProgressBar.setValue((int) Math.min(100, percentage));
-                        batchProgressBar.setString(String.format("进度: %d/%d (%.2f%%)", currentProcessed, total, percentage));
-                        batchElapsedTimeLabel.setText("已过时间: " + formatTime(elapsed));
+                        batchProgressBar.setString(getString("progress.total", currentProcessed, total, percentage));
+                        batchElapsedTimeLabel.setText(getString("elapsedTime", formatTime(elapsed)));
                         if (!isBatchSearchPaused) {
                             if (remaining > 0) {
-                                batchRemainingTimeLabel.setText("剩余时间: " + formatTime(remaining));
+                                batchRemainingTimeLabel.setText(getString("remainingTime", formatTime(remaining)));
                             } else {
-                                batchRemainingTimeLabel.setText("剩余时间: 计算中...");
+                                batchRemainingTimeLabel.setText(getString("remainingTime.calculating"));
                             }
                         }
                     });
@@ -1636,7 +1694,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     isBatchSearchPaused = false;
                     batchStartButton.setEnabled(true);
                     batchPauseButton.setEnabled(false);
-                    batchPauseButton.setText("暂停");
+                    batchPauseButton.setText(getString("button.pause"));
                     batchStopButton.setEnabled(false);
                     batchResetButton.setEnabled(true);
                     batchImportButton.setEnabled(true);
@@ -1646,18 +1704,18 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     batchMaxXField.setEnabled(true);
                     batchMinZField.setEnabled(true);
                     batchMaxZField.setEnabled(true);
-                    batchProgressBar.setString(String.format("进度: %d/%d (100.00%%) - 完成", total, total));
-                    batchRemainingTimeLabel.setText("剩余时间: 已完成");
+                    batchProgressBar.setString(getString("progress.complete", total, total));
+                    batchRemainingTimeLabel.setText(getString("remainingTime.completed"));
                 });
             }).start();
             
         } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, "启动搜索失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, getString("error.startSearchFailed", e.getMessage()), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
             isBatchSearchRunning = false;
             isBatchSearchPaused = false;
             batchStartButton.setEnabled(true);
             batchPauseButton.setEnabled(false);
-            batchPauseButton.setText("暂停");
+            batchPauseButton.setText(getString("button.pause"));
             batchStopButton.setEnabled(false);
             batchResetButton.setEnabled(true);
             batchImportButton.setEnabled(true);
@@ -1679,7 +1737,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         if (isBatchSearchPaused) {
             // 恢复
             isBatchSearchPaused = false;
-            batchPauseButton.setText("暂停");
+            batchPauseButton.setText(getString("button.pause"));
             batchThreadCountField.setEnabled(false);
             synchronized (this) {
                 if (currentBatchSearcher != null) {
@@ -1689,14 +1747,14 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         } else {
             // 暂停
             isBatchSearchPaused = true;
-            batchPauseButton.setText("继续");
+            batchPauseButton.setText(getString("button.resume"));
             batchThreadCountField.setEnabled(true);
             synchronized (this) {
                 if (currentBatchSearcher != null) {
                     currentBatchSearcher.pause();
                 }
             }
-            batchRemainingTimeLabel.setText("剩余时间: 已暂停");
+            batchRemainingTimeLabel.setText(getString("remainingTime.paused"));
         }
     }
 
@@ -1712,7 +1770,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         }
         batchStartButton.setEnabled(true);
         batchPauseButton.setEnabled(false);
-        batchPauseButton.setText("暂停");
+        batchPauseButton.setText(getString("button.pause"));
         batchStopButton.setEnabled(false);
         batchResetButton.setEnabled(true);
         batchImportButton.setEnabled(true);
@@ -1722,7 +1780,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         batchMaxXField.setEnabled(true);
         batchMinZField.setEnabled(true);
         batchMaxZField.setEnabled(true);
-        batchRemainingTimeLabel.setText("剩余时间: 已停止");
+        batchRemainingTimeLabel.setText(getString("remainingTime.stopped"));
     }
 
     // 重置批量搜索区域
@@ -1737,14 +1795,14 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private void exportBatchResults(boolean fullFormat) {
         String text = batchResultArea.getText().trim();
         if (text.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "没有结果可导出", "提示", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(this, getString("error.noResultsToExport"), getString("prompt.information"), JOptionPane.INFORMATION_MESSAGE);
             return;
         }
 
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle(fullFormat ? "导出完整结果" : "导出种子列表");
-        fileChooser.setFileFilter(new FileNameExtensionFilter("文本文件 (*.txt)", "txt"));
-        fileChooser.setSelectedFile(new File(fullFormat ? "batch_output.txt" : "batch_seeds.txt"));
+        fileChooser.setDialogTitle(fullFormat ? getString("dialog.exportFullResults") : getString("dialog.exportSeedList"));
+        fileChooser.setFileFilter(new FileNameExtensionFilter(getString("dialog.textFiles"), "txt"));
+        fileChooser.setSelectedFile(new File(fullFormat ? getString("file.batchOutput") : getString("file.batchSeeds")));
 
         int result = fileChooser.showSaveDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
@@ -1766,9 +1824,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                         }
                     }
                 }
-                JOptionPane.showMessageDialog(this, "导出成功！", "成功", JOptionPane.INFORMATION_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("success.export"), getString("prompt.success"), JOptionPane.INFORMATION_MESSAGE);
             } catch (IOException e) {
-                JOptionPane.showMessageDialog(this, "导出失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, getString("error.exportFailed", e.getMessage()), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
             }
         }
     }
@@ -1884,19 +1942,121 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         }
     }
 
+    private void changeLanguage() {
+        if (isSearchRunning || isSearchPaused || isBatchSearchRunning || isBatchSearchPaused) {
+            if (languageComboBox != null) {
+                if (I18n.getCurrentLocale().getLanguage().equals("zh")) {
+                    languageComboBox.setSelectedIndex(0);
+                } else {
+                    languageComboBox.setSelectedIndex(1);
+                }
+            }
+            return;
+        }
+
+        java.util.Locale newLocale;
+        if (languageComboBox != null && languageComboBox.getSelectedIndex() == 0) {
+            newLocale = new java.util.Locale("zh", "CN");
+        } else {
+            newLocale = new java.util.Locale("en", "US");
+        }
+
+        if (newLocale.equals(I18n.getCurrentLocale())) {
+            return;
+        }
+
+        I18n.setLocale(newLocale);
+        updateUITexts();
+    }
+
+    private void updateUITexts() {
+        SwingUtilities.invokeLater(() -> {
+            setTitle(getString("window.title"));
+            if (tabbedPane != null) {
+                tabbedPane.setTitleAt(0, getString("tab.singleSeedSearch"));
+                tabbedPane.setTitleAt(1, getString("tab.batchSeedSearch"));
+            }
+            updateSingleSeedSearchTexts();
+            updateBatchSearchTexts();
+        });
+    }
+
+    private void updateSingleSeedSearchTexts() {
+        if (searchSeedLabel != null) searchSeedLabel.setText(getString("label.seed"));
+        if (searchThreadCountLabel != null) searchThreadCountLabel.setText(getString("label.threadCount"));
+        if (searchVersionLabel != null) searchVersionLabel.setText(getString("label.mcVersion"));
+        if (searchMinXLabel != null) searchMinXLabel.setText(getString("label.minX"));
+        if (searchMaxXLabel != null) searchMaxXLabel.setText(getString("label.maxX"));
+        if (searchMinZLabel != null) searchMinZLabel.setText(getString("label.minZ"));
+        if (searchMaxZLabel != null) searchMaxZLabel.setText(getString("label.maxZ"));
+        if (searchLanguageLabel != null) searchLanguageLabel.setText(getString("label.language"));
+        if (searchCreditLabel != null) searchCreditLabel.setText(getString("credit.text"));
+        if (searchRightPanel != null) {
+            searchRightPanel.setBorder(BorderFactory.createTitledBorder(getString("result.border")));
+        }
+        if (pauseOnPairFoundCheckBox != null) {
+            pauseOnPairFoundCheckBox.setText(getString("check.pauseOnPairFound"));
+        }
+        if (searchStartButton != null) searchStartButton.setText(getString("button.startSearch"));
+        if (searchPauseButton != null && !isSearchPaused) {
+            searchPauseButton.setText(getString("button.pause"));
+        }
+        if (searchStopButton != null) searchStopButton.setText(getString("button.stop"));
+        if (searchResetButton != null) searchResetButton.setText(getString("button.reset"));
+        if (searchExportButton != null) searchExportButton.setText(getString("button.export"));
+        if (searchSortButton != null) searchSortButton.setText(getString("button.sort"));
+        if (searchProgressBar != null && !isSearchRunning) {
+            searchProgressBar.setString(getString("progress.initial"));
+        }
+        if (searchElapsedTimeLabel != null && !isSearchRunning) {
+            searchElapsedTimeLabel.setText(getString("elapsedTime.initial"));
+        }
+        if (searchRemainingTimeLabel != null && !isSearchRunning && !isSearchPaused) {
+            searchRemainingTimeLabel.setText(getString("remainingTime.calculating"));
+        }
+    }
+
+    private void updateBatchSearchTexts() {
+        if (batchSeedFileTitleLabel != null) batchSeedFileTitleLabel.setText(getString("label.seedFile"));
+        if (batchImportButton != null) batchImportButton.setText(getString("button.selectFile"));
+        if (batchSeedFileLabel != null && batchSeedList.isEmpty()) {
+            batchSeedFileLabel.setText(getString("label.noFileSelected"));
+        } else if (batchSeedFileLabel != null && !batchSeedFileName.isEmpty()) {
+            batchSeedFileLabel.setText(getString("label.seedFileSelected", batchSeedFileName, batchSeedList.size()));
+        }
+        if (batchThreadCountLabel != null) batchThreadCountLabel.setText(getString("label.threadCount"));
+        if (batchVersionLabel != null) batchVersionLabel.setText(getString("label.mcVersion"));
+        if (batchMinXLabel != null) batchMinXLabel.setText(getString("label.minX"));
+        if (batchMaxXLabel != null) batchMaxXLabel.setText(getString("label.maxX"));
+        if (batchMinZLabel != null) batchMinZLabel.setText(getString("label.minZ"));
+        if (batchMaxZLabel != null) batchMaxZLabel.setText(getString("label.maxZ"));
+        if (batchCreditLabel != null) batchCreditLabel.setText(getString("credit.text"));
+        if (batchRightPanel != null) {
+            batchRightPanel.setBorder(BorderFactory.createTitledBorder(getString("result.border")));
+        }
+        if (batchStartButton != null) batchStartButton.setText(getString("button.startSearch"));
+        if (batchPauseButton != null && !isBatchSearchPaused) {
+            batchPauseButton.setText(getString("button.pause"));
+        }
+        if (batchStopButton != null) batchStopButton.setText(getString("button.stop"));
+        if (batchResetButton != null) batchResetButton.setText(getString("button.reset"));
+        if (batchExportFullButton != null) batchExportFullButton.setText(getString("button.exportFull"));
+        if (batchExportSeedsButton != null) batchExportSeedsButton.setText(getString("button.exportSeeds"));
+        if (batchSortButton != null) batchSortButton.setText(getString("button.sort"));
+        if (batchProgressBar != null && !isBatchSearchRunning) {
+            batchProgressBar.setString(getString("progress.initial"));
+        }
+        if (batchElapsedTimeLabel != null && !isBatchSearchRunning) {
+            batchElapsedTimeLabel.setText(getString("elapsedTime.initial"));
+        }
+        if (batchRemainingTimeLabel != null && !isBatchSearchRunning && !isBatchSearchPaused) {
+            batchRemainingTimeLabel.setText(getString("remainingTime.calculating"));
+        }
+    }
+
     public static void main(String[] args) {
         // 注意：系统属性应该在 Launcher 中设置
         // 这里只保留必要的初始化逻辑
-        
-        // 在主线程中预先初始化 SeedCheckerSettings，避免在多线程环境中初始化
-        // 使用 try-catch 来捕获可能的初始化错误，但继续执行程序
-        try {
-            SeedCheckerInitializer.initialize();
-        } catch (ExceptionInInitializerError e) {
-            // 如果初始化失败，打印警告但继续执行
-            System.err.println("Warning: SeedChecker initialization failed, but continuing...");
-            System.err.println("You may need to run the JAR with: java -Dlog4j2.callerClass=project.Launcher -Dlog4j2.enable.threadlocals=false -jar ...");
-        }
         
         SwingUtilities.invokeLater(() -> {
             try {
