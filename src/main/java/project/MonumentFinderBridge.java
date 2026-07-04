@@ -20,7 +20,16 @@ public final class MonumentFinderBridge {
     public static final int MC_1_18 = 22;
     public static final int MC_1_19 = 24;
     public static final int MC_1_20 = 25;
-    public static final int MC_1_21 = 27;
+    /** MC_1_21_1 in cubiomes (xpple fork) */
+    public static final int MC_1_21_1 = 26;
+    /** MC_1_21_1 alias */
+    public static final int MC_1_21 = MC_1_21_1;
+    public static final int MC_26_1 = 33;
+    public static final int MC_26_2 = 34;
+
+    public static final String[] SUPPORTED_VERSION_LABELS = {
+            "26.2", "26.1", "1.21.1", "1.20.1", "1.19.2", "1.18.2"
+    };
 
     /** ints per pair result: hangX, hangZ, dx, dz, lowEfficiencyFlag */
     public static final int PAIR_STRIDE = 5;
@@ -116,12 +125,15 @@ public final class MonumentFinderBridge {
     }
 
     public static int mcFromVersionString(String versionString) {
-        if (versionString == null) return MC_1_21;
+        if (versionString == null) return MC_26_2;
         return switch (versionString) {
             case "1.18.2" -> MC_1_18;
             case "1.19.2" -> MC_1_19;
             case "1.20.1" -> MC_1_20;
-            default -> MC_1_21;
+            case "1.21.1" -> MC_1_21_1;
+            case "26.1" -> MC_26_1;
+            case "26.2" -> MC_26_2;
+            default -> MC_26_2;
         };
     }
 
@@ -147,4 +159,19 @@ public final class MonumentFinderBridge {
     public static native boolean stop();
 
     public static native void resetSearchState();
+
+    /** @return 0=others, 1=cold, 2=frozen ocean type at pair center */
+    public static native int classifyOceanType(long seed, int mc, int centerX, int centerZ);
+
+    public static String oceanTypeLabel(long seed, int mc, int centerX, int centerZ) {
+        try {
+            return switch (classifyOceanType(seed, mc, centerX, centerZ)) {
+                case 1 -> "cold";
+                case 2 -> "frozen";
+                default -> "others";
+            };
+        } catch (UnsatisfiedLinkError e) {
+            return "others";
+        }
+    }
 }

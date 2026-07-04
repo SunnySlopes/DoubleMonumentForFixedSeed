@@ -13,8 +13,14 @@ extern "C" {
 #define project_MonumentFinderBridge_MC_1_19 24L
 #undef project_MonumentFinderBridge_MC_1_20
 #define project_MonumentFinderBridge_MC_1_20 25L
+#undef project_MonumentFinderBridge_MC_1_21_1
+#define project_MonumentFinderBridge_MC_1_21_1 26L
 #undef project_MonumentFinderBridge_MC_1_21
-#define project_MonumentFinderBridge_MC_1_21 27L
+#define project_MonumentFinderBridge_MC_1_21 26L
+#undef project_MonumentFinderBridge_MC_26_1
+#define project_MonumentFinderBridge_MC_26_1 33L
+#undef project_MonumentFinderBridge_MC_26_2
+#define project_MonumentFinderBridge_MC_26_2 34L
 #undef project_MonumentFinderBridge_PAIR_STRIDE
 #define project_MonumentFinderBridge_PAIR_STRIDE 5L
 /*
@@ -72,6 +78,14 @@ JNIEXPORT jboolean JNICALL Java_project_MonumentFinderBridge_stop
  */
 JNIEXPORT void JNICALL Java_project_MonumentFinderBridge_resetSearchState
   (JNIEnv *, jclass);
+
+/*
+ * Class:     project_MonumentFinderBridge
+ * Method:    classifyOceanType
+ * Signature: (JIII)I
+ */
+JNIEXPORT jint JNICALL Java_project_MonumentFinderBridge_classifyOceanType
+  (JNIEnv *, jclass, jlong, jint, jint, jint);
 
 #ifdef __cplusplus
 }

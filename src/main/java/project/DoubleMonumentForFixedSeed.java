@@ -46,6 +46,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JTextField searchThreadCountField;
     private JComboBox<String> versionComboBox;
     private JCheckBox pauseOnPairFoundCheckBox;
+    private JCheckBox biomeCheckCheckBox;
+    private JCheckBox batchBiomeCheckCheckBox;
     private JTextField minXField;
     private JTextField maxXField;
     private JTextField minZField;
@@ -69,6 +71,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private int lastSearchMinZ = 0;
     private int lastSearchMaxZ = 0;
     private int lastSearchThreadCount = 0;
+    private long formatContextSeed = 0;
+    private int formatContextMc = MonumentFinderBridge.MC_26_2;
     
     // 第二个tab的组件
     private JButton batchImportButton;
@@ -138,8 +142,19 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         return I18n.get(key, args);
     }
 
+    private boolean isBiomeCheckSelected() {
+        if (isBatchSearchRunning) {
+            return batchBiomeCheckCheckBox != null && batchBiomeCheckCheckBox.isSelected();
+        }
+        return biomeCheckCheckBox != null && biomeCheckCheckBox.isSelected();
+    }
+
     private String formatPairResult(int hangX, int hangZ, int dx, int dz, boolean lowEfficiency) {
-        return I18n.formatPair(hangX, hangZ, dx, dz, lowEfficiency);
+        String oceanTypeKey = null;
+        if (isBiomeCheckSelected()) {
+            oceanTypeKey = MonumentFinderBridge.oceanTypeLabel(formatContextSeed, formatContextMc, hangX, hangZ);
+        }
+        return I18n.formatPair(hangX, hangZ, dx, dz, lowEfficiency, oceanTypeKey);
     }
 
     private String nativeErrorMessage() {
@@ -207,9 +222,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
-        String[] versionOptions = {"1.21.1", "1.20.1", "1.19.2", "1.18.2"};
+        String[] versionOptions = MonumentFinderBridge.SUPPORTED_VERSION_LABELS;
         versionComboBox = new JComboBox<>(versionOptions);
-        versionComboBox.setSelectedIndex(0); // 默认选择 1.21.1
+        versionComboBox.setSelectedIndex(0); // 默认选择 26.2
         inputPanel.add(versionComboBox, gbc);
 
         // MinX 输入
@@ -320,6 +335,15 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         pauseOnPairFoundCheckBox.setFont(getLoadedFont());
         pauseOnPairFoundCheckBox.setSelected(false);
         inputPanel.add(pauseOnPairFoundCheckBox, gbc);
+
+        // 群系检查选项
+        gbc.gridx = 0;
+        gbc.gridy = 9;
+        gbc.gridwidth = 2;
+        biomeCheckCheckBox = new JCheckBox(getString("check.biomeCheck"));
+        biomeCheckCheckBox.setFont(getLoadedFont());
+        biomeCheckCheckBox.setSelected(true);
+        inputPanel.add(biomeCheckCheckBox, gbc);
         gbc.gridwidth = 1;
 
         // 按钮区域
@@ -492,6 +516,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 searchThreadCountField.setEnabled(true);
                 versionComboBox.setEnabled(true);
                 pauseOnPairFoundCheckBox.setEnabled(true);
+        if (biomeCheckCheckBox != null) {
+            biomeCheckCheckBox.setEnabled(true);
+        }
                 minXField.setEnabled(true);
                 maxXField.setEnabled(true);
                 minZField.setEnabled(true);
@@ -623,7 +650,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     // 获取其他参数
                     String selectedVersion = (String) versionComboBox.getSelectedItem();
                     int mc = MonumentFinderBridge.mcFromVersionString(
-                            selectedVersion != null ? selectedVersion : "1.21.1");
+                            selectedVersion != null ? selectedVersion : "26.2");
 
                     if (searcher == null || searcher.getMc() != mc) {
                         searcher = new MonumentSearchRunner(mc);
@@ -637,6 +664,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     int minZ = Integer.parseInt(minZField.getText().trim());
                     int maxZ = Integer.parseInt(maxZField.getText().trim());
                     
+                    formatContextSeed = seed;
+                    formatContextMc = mc;
                     boolean pauseOnPairFound = pauseOnPairFoundCheckBox.isSelected();
                     searcher.startSearch(seed, threadCount, minX, maxX, minZ, maxZ, 
                             this::updateSearchProgress, this::addSearchResult, pauseOnPairFound,
@@ -838,6 +867,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             searchThreadCountField.setEnabled(false); // 运行中不能修改，暂停时可以修改
             versionComboBox.setEnabled(false);
             pauseOnPairFoundCheckBox.setEnabled(false);
+            if (biomeCheckCheckBox != null) {
+                biomeCheckCheckBox.setEnabled(false);
+            }
             if (languageComboBox != null) {
                 languageComboBox.setEnabled(false);
             }
@@ -854,9 +886,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             // 获取选择的版本
             String selectedVersion = (String) versionComboBox.getSelectedItem();
             int mc = MonumentFinderBridge.mcFromVersionString(
-                    selectedVersion != null ? selectedVersion : "1.21.1");
+                    selectedVersion != null ? selectedVersion : "26.2");
 
             searcher = new MonumentSearchRunner(mc);
+            formatContextSeed = seed;
+            formatContextMc = mc;
             boolean pauseOnPairFound = pauseOnPairFoundCheckBox.isSelected();
             searcher.startSearch(seed, threadCount, minX, maxX, minZ, maxZ, this::updateSearchProgress, this::addSearchResult, pauseOnPairFound,
                             this::formatPairResult, nativeErrorMessage());
@@ -901,6 +935,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         searchThreadCountField.setEnabled(true);
         versionComboBox.setEnabled(true);
         pauseOnPairFoundCheckBox.setEnabled(true);
+        if (biomeCheckCheckBox != null) {
+            biomeCheckCheckBox.setEnabled(true);
+        }
         minXField.setEnabled(true);
         maxXField.setEnabled(true);
         minZField.setEnabled(true);
@@ -951,6 +988,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 searchThreadCountField.setEnabled(true);
                 versionComboBox.setEnabled(true);
                 pauseOnPairFoundCheckBox.setEnabled(true);
+        if (biomeCheckCheckBox != null) {
+            biomeCheckCheckBox.setEnabled(true);
+        }
                 if (languageComboBox != null) {
                     languageComboBox.setEnabled(true);
                 }
@@ -1161,10 +1201,21 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
-        String[] versionOptions = {"1.21.1", "1.20.1", "1.19.2", "1.18.2"};
-        batchVersionComboBox = new JComboBox<>(versionOptions);
+        batchVersionComboBox = new JComboBox<>(MonumentFinderBridge.SUPPORTED_VERSION_LABELS);
         batchVersionComboBox.setSelectedIndex(0);
         inputPanel.add(batchVersionComboBox, gbc);
+
+        // 群系检查选项
+        gbc.gridx = 0;
+        gbc.gridy = 8;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
+        gbc.gridwidth = 2;
+        batchBiomeCheckCheckBox = new JCheckBox(getString("check.biomeCheck"));
+        batchBiomeCheckCheckBox.setFont(getLoadedFont());
+        batchBiomeCheckCheckBox.setSelected(true);
+        inputPanel.add(batchBiomeCheckCheckBox, gbc);
+        gbc.gridwidth = 1;
 
         // MinX 输入
         gbc.gridx = 0;
@@ -1501,7 +1552,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             // 获取选择的版本
             String selectedVersion = (String) batchVersionComboBox.getSelectedItem();
             int mc = MonumentFinderBridge.mcFromVersionString(
-                    selectedVersion != null ? selectedVersion : "1.21.1");
+                    selectedVersion != null ? selectedVersion : "26.2");
 
             // 创建final副本用于lambda表达式
             final int finalThreadCount = threadCount;
@@ -1525,6 +1576,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             batchMaxXField.setEnabled(false);
             batchMinZField.setEnabled(false);
             batchMaxZField.setEnabled(false);
+            if (batchBiomeCheckCheckBox != null) {
+                batchBiomeCheckCheckBox.setEnabled(false);
+            }
             batchResultArea.setText("");
             batchProgressBar.setValue(0);
             batchProgressBar.setString(getString("progress.total", 0, batchSeedList.size(), 0.0));
@@ -1548,6 +1602,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                         currentBatchSearcher = batchSearcher;
                     }
                     final long currentSeed = seed;
+                    formatContextSeed = currentSeed;
+                    formatContextMc = mc;
                     
                     // 在独立线程中阻塞执行搜索，主循环 join 等待（避免 isRunning 竞态导致立即跳过）
                     final MonumentSearchRunner searcherForSeed = batchSearcher;
@@ -1661,6 +1717,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                         // 输出结果
                         final List<ResultItem> finalResults = resultItems;
                         SwingUtilities.invokeLater(() -> {
+                            formatContextSeed = currentSeed;
+                            formatContextMc = mc;
                             batchResultArea.append(String.valueOf(currentSeed) + "\n");
                             for (ResultItem item : finalResults) {
                                 String resultLine = formatPairResult(item.centerX, item.centerZ, item.dx, item.dz, item.isLowEfficiency);
@@ -1704,6 +1762,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     batchMaxXField.setEnabled(true);
                     batchMinZField.setEnabled(true);
                     batchMaxZField.setEnabled(true);
+                    if (batchBiomeCheckCheckBox != null) {
+                        batchBiomeCheckCheckBox.setEnabled(true);
+                    }
                     batchProgressBar.setString(getString("progress.complete", total, total));
                     batchRemainingTimeLabel.setText(getString("remainingTime.completed"));
                 });
@@ -1725,6 +1786,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             batchMaxXField.setEnabled(true);
             batchMinZField.setEnabled(true);
             batchMaxZField.setEnabled(true);
+            if (batchBiomeCheckCheckBox != null) {
+                batchBiomeCheckCheckBox.setEnabled(true);
+            }
         }
     }
 
@@ -1780,6 +1844,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         batchMaxXField.setEnabled(true);
         batchMinZField.setEnabled(true);
         batchMaxZField.setEnabled(true);
+        if (batchBiomeCheckCheckBox != null) {
+            batchBiomeCheckCheckBox.setEnabled(true);
+        }
         batchRemainingTimeLabel.setText(getString("remainingTime.stopped"));
     }
 
@@ -1996,6 +2063,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         }
         if (pauseOnPairFoundCheckBox != null) {
             pauseOnPairFoundCheckBox.setText(getString("check.pauseOnPairFound"));
+        }
+        if (biomeCheckCheckBox != null) {
+            biomeCheckCheckBox.setText(getString("check.biomeCheck"));
+        }
+        if (batchBiomeCheckCheckBox != null) {
+            batchBiomeCheckCheckBox.setText(getString("check.biomeCheck"));
         }
         if (searchStartButton != null) searchStartButton.setText(getString("button.startSearch"));
         if (searchPauseButton != null && !isSearchPaused) {

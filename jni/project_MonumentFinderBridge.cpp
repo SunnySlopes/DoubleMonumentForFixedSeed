@@ -2,6 +2,7 @@
 
 #include "../Thread.h"
 #include "../monument_search.h"
+#include "../monument_search_core.h"
 
 #include <vector>
 
@@ -112,4 +113,9 @@ JNIEXPORT void JNICALL Java_project_MonumentFinderBridge_resetSearchState(JNIEnv
 {
     g_progress.try_pause = false;
     g_progress.try_stop = false;
+}
+
+JNIEXPORT jint JNICALL Java_project_MonumentFinderBridge_classifyOceanType
+  (JNIEnv *, jclass, jlong seed, jint mc, jint centerX, jint centerZ) {
+    return monument_classify_ocean_type(mc, (uint64_t) seed, centerX, centerZ);
 }

@@ -52,6 +52,19 @@ int monument_exists_at_block_g(
     int *outBlockX,
     int *outBlockZ);
 
+/** Ocean type at pair center: 0=others, 1=cold, 2=frozen */
+int monument_classify_ocean_type(
+    int mc,
+    uint64_t seed,
+    int centerX,
+    int centerZ);
+
+int monument_classify_ocean_type_g(
+    MonumentGenerator *g,
+    int mc,
+    int centerX,
+    int centerZ);
+
 #ifdef __cplusplus
 }
 #endif

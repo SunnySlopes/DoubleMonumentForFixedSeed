@@ -19,7 +19,16 @@ public final class MonumentNativeSmokeTest {
         if (raw == null) {
             System.out.println("No pairs (ok if none in range).");
         } else {
-            System.out.println(MonumentFinderBridge.formatResults(raw));
+            I18n.initFromSystemDefault();
+            for (int i = 0; i + MonumentFinderBridge.PAIR_STRIDE <= raw.length; i += MonumentFinderBridge.PAIR_STRIDE) {
+                int hangX = raw[i];
+                int hangZ = raw[i + 1];
+                int dx = raw[i + 2];
+                int dz = raw[i + 3];
+                boolean low = raw[i + 4] != 0;
+                String type = MonumentFinderBridge.oceanTypeLabel(1L, MonumentFinderBridge.MC_1_21, hangX, hangZ);
+                System.out.println(I18n.formatPair(hangX, hangZ, dx, dz, low, type));
+            }
         }
         int[] progress = MonumentFinderBridge.getSearchProgress();
         if (progress != null) {

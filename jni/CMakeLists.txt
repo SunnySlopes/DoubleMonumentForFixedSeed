@@ -54,22 +54,19 @@ add_custom_command(
 
 add_custom_target(generate_jni_header DEPENDS ${JNI_GEN_HEADER})
 
+add_subdirectory(${PROJECT_ROOT}/cubiomes ${CMAKE_BINARY_DIR}/cubiomes)
+
 set(SOURCES
         project_MonumentFinderBridge.cpp
         ../monument_search.cpp
         ../monument_search_core.c
-        ../cubiomes/finders.c
-        ../cubiomes/generator.c
-        ../cubiomes/layers.c
-        ../cubiomes/biomenoise.c
-        ../cubiomes/biomes.c
-        ../cubiomes/noise.c
-        ../cubiomes/util.c
 )
 
 add_library(monumentFinderLibJ SHARED ${SOURCES} ${JNI_GEN_HEADER})
 
 add_dependencies(monumentFinderLibJ generate_jni_header)
+
+target_link_libraries(monumentFinderLibJ PRIVATE cubiomes_static)
 
 target_include_directories(monumentFinderLibJ PRIVATE
         ${JNI_INCLUDE_DIRS}

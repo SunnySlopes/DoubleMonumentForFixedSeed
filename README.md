@@ -1,9 +1,9 @@
 # Double Monument For Fixed Seed  
 # 固定种子二联海底神殿搜索工具
 
-A GUI program for searching **double ocean monuments** (paired ocean monuments) in Minecraft Java Edition fixed seeds. Supports Minecraft Java Edition **1.18.2** through **1.21.1**.
+A GUI program for searching **double ocean monuments** (paired ocean monuments) in Minecraft Java Edition fixed seeds. Supports Minecraft Java Edition **1.18.2** through **26.2**.
 
-用于在 Minecraft Java 版固定种子中搜索**二联海底神殿**（成对生成的海底神殿）的图形界面工具。支持 **1.18.2** 至 **1.21.1**。
+用于在 Minecraft Java 版固定种子中搜索**二联海底神殿**（成对生成的海底神殿）的图形界面工具。支持 **1.18.2** 至 **26.2**。
 
 Search uses **cubiomes** via a native library (JNI): monument positions and **deep-ocean biome viability** (`isViableStructurePos` for monuments). Results may differ from older versions that used custom climate noise thresholds.
 
@@ -127,4 +127,4 @@ Import a text file (one seed per line), configure region and thread count, then 
 | `src/main/resources/messages_*.properties` | UI i18n strings (zh_CN / en_US) / 界面国际化文案 |
 | `monument_search.cpp` / `monument_search_core.c` | C++ search and cubiomes calls / C++ 搜索与 cubiomes 调用 |
 | `jni/` | JNI glue and CMake target `monumentFinderLibJ` |
-| `cubiomes/` | git submodule ([Cubitect/cubiomes](https://github.com/Cubitect/cubiomes)) |
+| `cubiomes/` | git submodule ([xpple/cubiomes](https://github.com/xpple/cubiomes)) |

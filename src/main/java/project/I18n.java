@@ -57,9 +57,20 @@ public final class I18n {
     }
 
     public static String formatPair(int hangX, int hangZ, int dx, int dz, boolean lowEfficiency) {
+        return formatPair(hangX, hangZ, dx, dz, lowEfficiency, null);
+    }
+
+    public static String formatPair(int hangX, int hangZ, int dx, int dz, boolean lowEfficiency, String oceanTypeKey) {
         // Use Locale.ROOT so coordinates never get thousand-separator commas (e.g. -1,024).
-        MessageFormat mf = new MessageFormat(messages.getString("result.tpFormat"), Locale.ROOT);
-        String base = mf.format(new Object[] {hangX, hangZ, dx, dz});
+        String base;
+        if (oceanTypeKey != null && !oceanTypeKey.isEmpty()) {
+            String typeLabel = get("result.oceanType." + oceanTypeKey);
+            MessageFormat mf = new MessageFormat(messages.getString("result.tpFormatWithType"), Locale.ROOT);
+            base = mf.format(new Object[] {hangX, hangZ, typeLabel, dx, dz});
+        } else {
+            MessageFormat mf = new MessageFormat(messages.getString("result.tpFormat"), Locale.ROOT);
+            base = mf.format(new Object[] {hangX, hangZ, dx, dz});
+        }
         if (lowEfficiency) {
             return base + get("result.lowEfficiencySuffix");
         }
