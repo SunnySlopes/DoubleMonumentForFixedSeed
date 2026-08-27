@@ -13,11 +13,29 @@ template<typename T>
 class ThreadSafeResults {
     std::priority_queue<T> results_;
     mutable std::mutex mutex_{};
+    /* 结果上限（0 = 不限）。几何-only 大范围搜索会产出海量候选，
+     * 队列满后丢弃新结果并跳过昂贵计算，防止 OOM */
+    size_t limit_ = 0;
 
 public:
+    void setLimit(size_t limit)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        limit_ = limit;
+    }
+
+    /* @return true 当结果数已达上限（调用方可提前跳过昂贵计算） */
+    bool full() const
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return limit_ != 0 && results_.size() >= limit_;
+    }
+
     void addResult(const T &res)
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (limit_ != 0 && results_.size() >= limit_)
+            return;
         results_.emplace(res);
     }
 

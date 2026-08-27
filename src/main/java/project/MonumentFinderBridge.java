@@ -146,7 +146,8 @@ public final class MonumentFinderBridge {
             int mc,
             int numThreads,
             boolean pauseOnPairFound,
-            int pairLevel);
+            int pairLevel,
+            boolean biomeCheck);
 
     /** @return [processed, total, status] or null */
     public static native int[] getSearchProgress();

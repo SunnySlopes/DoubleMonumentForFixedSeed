@@ -9,6 +9,10 @@
 static Progress g_progress{};
 static ThreadSafeResults<PairHit> g_results{};
 
+/* 结果队列上限：防止几何-only（不勾群系检查）大范围搜索时结果无限膨胀。
+ * 分块按距搜索中心排序，超限后保留的是靠中心的候选 */
+static constexpr size_t kMaxQueuedResults = 20000;
+
 static std::vector<jint> pairsToFlatInts(const std::vector<PairHit> &hits)
 {
     /* stride: x, z, dx, dz, count, area */
@@ -39,7 +43,7 @@ static jintArray makeIntArray(JNIEnv *env, const std::vector<jint> &data)
 
 JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_monumentSearch
   (JNIEnv *env, jclass, jlong seed, jint minX, jint maxX, jint minZ, jint maxZ, jint mc,
-   jint numThreads, jboolean pauseOnPairFound, jint pairLevel) {
+   jint numThreads, jboolean pauseOnPairFound, jint pairLevel, jboolean biomeCheck) {
     MonumentSearchConfig cfg;
     cfg.seed = (uint64_t) seed;
     cfg.minX = minX;
@@ -49,8 +53,10 @@ JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_monumentSearch
     cfg.mc = mc;
     cfg.pauseOnPairFound = pauseOnPairFound == JNI_TRUE;
     cfg.pairLevel = pairLevel >= 2 && pairLevel <= 4 ? pairLevel : 2;
+    cfg.biomeCheck = biomeCheck == JNI_TRUE;
 
     g_results.clear();
+    g_results.setLimit(kMaxQueuedResults);
     g_progress.current = 0;
     g_progress.total = 0;
     g_progress.status = 0;

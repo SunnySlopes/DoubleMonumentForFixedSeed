@@ -734,7 +734,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     boolean pauseOnPairFound = pauseOnPairFoundCheckBox.isSelected();
                     searcher.startSearch(seed, threadCount, minX, maxX, minZ, maxZ,
                             this::updateSearchProgress, this::addSearchResult, pauseOnPairFound,
-                            getSelectedPairLevel(pairLevelComboBox),
+                            isBiomeCheckSelected(), getSelectedPairLevel(pairLevelComboBox),
                             this::formatGroupResult, nativeErrorMessage());
                     
                     lastSearchThreadCount = threadCount;
@@ -962,7 +962,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             formatContextMc = mc;
             boolean pauseOnPairFound = pauseOnPairFoundCheckBox.isSelected();
             searcher.startSearch(seed, threadCount, minX, maxX, minZ, maxZ, this::updateSearchProgress, this::addSearchResult, pauseOnPairFound,
-                            getSelectedPairLevel(pairLevelComboBox),
+                            isBiomeCheckSelected(), getSelectedPairLevel(pairLevelComboBox),
                             this::formatGroupResult, nativeErrorMessage());
 
         } catch (NumberFormatException e) {
@@ -1707,6 +1707,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                                     null,
                                     null,
                                     false,
+                                    isBiomeCheckSelected(),
                                     finalPairLevel,
                                     this::formatGroupResult,
                                     nativeErrorMessage()),

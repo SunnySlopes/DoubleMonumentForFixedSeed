@@ -162,6 +162,7 @@ tasks.register('prepareNativeResources') {
     group = 'build'
     description = 'Collects dll/so/dylib into jar resources'
     outputs.dir(generatedNativeResourcesDir)
+    inputs.file('build/native/libmonumentFinderLibJ.dll')
     doLast {
         def outDir = generatedNativeResourcesDir.get().asFile
         delete(outDir)

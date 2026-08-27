@@ -41,6 +41,16 @@ int monument_try_region_g(
     int *outBlockX,
     int *outBlockZ);
 
+/** Structure-region RNG only (no biome sampling) — cheap geometric prefilter.
+ *  @return 1 if the region yields a structure position */
+int monument_region_pos(
+    uint64_t seed,
+    int mc,
+    int regX,
+    int regZ,
+    int *outBlockX,
+    int *outBlockZ);
+
 /** @return 1 if a monument exists near block (targetX,targetZ) within tolerance */
 int monument_exists_at_block(
     uint64_t seed,

@@ -108,6 +108,24 @@ int monument_try_region(
     return monument_try_region_g(&g, mc, seed, regX, regZ, outBlockX, outBlockZ);
 }
 
+int monument_region_pos(
+    uint64_t seed,
+    int mc,
+    int regX,
+    int regZ,
+    int *outBlockX,
+    int *outBlockZ)
+{
+    Pos pos;
+    if (!getStructurePos(Monument, mc, seed, regX, regZ, &pos))
+        return 0;
+    if (outBlockX)
+        *outBlockX = pos.x;
+    if (outBlockZ)
+        *outBlockZ = pos.z;
+    return 1;
+}
+
 int monument_exists_at_block_g(
     MonumentGenerator *g,
     int mc,
@@ -297,16 +315,12 @@ int monument_afk_coverage(
         if (p[i].x > maxX) maxX = p[i].x;
         if (p[i].z > maxZ) maxZ = p[i].z;
     }
-    minX += ax / 2;
-    minZ += az / 2;
-    maxX += ax / 2;
-    maxZ += az / 2;
+    int w = maxX - minX + ax;
+    int h = maxZ - minZ + az;
 
     MonumentBlockPos afk = {p[0].x + ax / 2, p[0].z + az / 2};
     int cnt = ax * az;
 
-    int w = maxX - minX;
-    int h = maxZ - minZ;
     if (w < 1 || h < 1) {
         if (outX) *outX = afk.x;
         if (outZ) *outZ = afk.z;
@@ -332,18 +346,47 @@ int monument_afk_coverage(
     d.az = az;
 
     /* seed candidates: midpoints of every pair of structures (cubiomes uses
-     * the same six midpoints for quads; here generalised for n = 1..4) */
-    MonumentBlockPos dsp[6];
+     * the same six midpoints for quads), plus 3/4-point centroids. For a
+     * triangle group the true optimum generally does not lie on any pair
+     * midpoint, and the flood fill cannot leave a two-box plateau to reach
+     * it -- the centroid seeds bridge that gap. */
+    MonumentBlockPos dsp[11];
     int ndsp = 0;
-    for (int i = 0; i < n && ndsp < 6; i++) {
-        for (int j = i + 1; j < n && ndsp < 6; j++) {
+    for (int i = 0; i < n && ndsp < 11; i++) {
+        for (int j = i + 1; j < n && ndsp < 11; j++) {
             dsp[ndsp].x = (p[i].x + p[j].x) / 2;
             dsp[ndsp].z = (p[i].z + p[j].z) / 2;
             ndsp++;
         }
     }
+    if (n >= 3 && ndsp < 11) {
+        int sx = 0;
+        int sz = 0;
+        for (int i = 0; i < n; i++) {
+            sx += p[i].x;
+            sz += p[i].z;
+        }
+        dsp[ndsp].x = sx / n;
+        dsp[ndsp].z = sz / n;
+        ndsp++;
+    }
+    if (n == 4) {
+        for (int skip = 0; skip < n && ndsp < 11; skip++) {
+            int sx = 0;
+            int sz = 0;
+            for (int i = 0; i < n; i++) {
+                if (i != skip) {
+                    sx += p[i].x;
+                    sz += p[i].z;
+                }
+            }
+            dsp[ndsp].x = sx / 3;
+            dsp[ndsp].z = sz / 3;
+            ndsp++;
+        }
+    }
 
-    int v[6] = {0};
+    int v[11] = {0};
     for (int i = 0; i < ndsp; i++)
         v[i] = afk_blocks_in_range(p, n, dsp[i].x, dsp[i].z, ax, az);
 

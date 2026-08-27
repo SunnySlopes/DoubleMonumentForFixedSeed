@@ -26,10 +26,10 @@ extern "C" {
 /*
  * Class:     project_MonumentFinderBridge
  * Method:    monumentSearch
- * Signature: (JIIIIIIZI)[I
+ * Signature: (JIIIIIIZIZ)[I
  */
 JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_monumentSearch
-  (JNIEnv *, jclass, jlong, jint, jint, jint, jint, jint, jint, jboolean, jint);
+  (JNIEnv *, jclass, jlong, jint, jint, jint, jint, jint, jint, jboolean, jint, jboolean);
 
 /*
  * Class:     project_MonumentFinderBridge

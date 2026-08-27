@@ -129,12 +129,13 @@ public class MonumentSearchRunner {
             Consumer<ProgressInfo> progressCallback,
             Consumer<String> resultCallback,
             boolean pauseOnPairFound,
+            boolean biomeCheck,
             int pairLevel,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
         if (isRunning && isPaused && threadCount > 0) {
             restartWithNewThreadCount(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback,
-                    resultCallback, pauseOnPairFound, pairLevel, resultFormatter, nativeErrorMessage);
+                    resultCallback, pauseOnPairFound, biomeCheck, pairLevel, resultFormatter, nativeErrorMessage);
             return;
         }
         if (isRunning) {
@@ -143,7 +144,7 @@ public class MonumentSearchRunner {
 
         Thread t = new Thread(
                 () -> runSearch(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback, resultCallback,
-                        pauseOnPairFound, pairLevel, resultFormatter, nativeErrorMessage),
+                        pauseOnPairFound, biomeCheck, pairLevel, resultFormatter, nativeErrorMessage),
                 "monument-search");
         t.setDaemon(true);
         searchThread = t;
@@ -163,6 +164,7 @@ public class MonumentSearchRunner {
             Consumer<ProgressInfo> progressCallback,
             Consumer<String> resultCallback,
             boolean pauseOnPairFound,
+            boolean biomeCheck,
             int pairLevel,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
@@ -170,7 +172,7 @@ public class MonumentSearchRunner {
             return;
         }
         runSearch(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback, resultCallback,
-                pauseOnPairFound, pairLevel, resultFormatter, nativeErrorMessage);
+                pauseOnPairFound, biomeCheck, pairLevel, resultFormatter, nativeErrorMessage);
     }
 
     /** Blocks until the async search thread from {@link #startSearch} finishes. */
@@ -191,6 +193,7 @@ public class MonumentSearchRunner {
             Consumer<ProgressInfo> progressCallback,
             Consumer<String> resultCallback,
             boolean pauseOnPairFound,
+            boolean biomeCheck,
             int pairLevel,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
@@ -204,7 +207,7 @@ public class MonumentSearchRunner {
         isRunning = false;
         isPaused = false;
         startSearch(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback, resultCallback,
-                pauseOnPairFound, pairLevel, resultFormatter, nativeErrorMessage);
+                pauseOnPairFound, biomeCheck, pairLevel, resultFormatter, nativeErrorMessage);
     }
 
     private void runSearch(
@@ -217,6 +220,7 @@ public class MonumentSearchRunner {
             Consumer<ProgressInfo> progressCallback,
             Consumer<String> resultCallback,
             boolean pauseOnPairFound,
+            boolean biomeCheck,
             int pairLevel,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
@@ -287,7 +291,8 @@ public class MonumentSearchRunner {
 
         try {
             int[] raw = MonumentFinderBridge.monumentSearch(
-                    seed, minX, maxX, minZ, maxZ, mc, threads, pauseOnPairFound, pairLevel);
+                    seed, minX, maxX, minZ, maxZ, mc, threads, pauseOnPairFound, pairLevel,
+                    biomeCheck);
             pollIncrementalResults(resultCallback, resultFormatter);
             if (raw != null) {
                 emitRawResults(raw, resultCallback, resultFormatter);

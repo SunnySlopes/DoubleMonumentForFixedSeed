@@ -46,6 +46,8 @@ struct MonumentSearchConfig {
     bool pauseOnPairFound = false;
     /* requested group size: 2 = pairs, 3 = triples, 4 = quadruples */
     int pairLevel = 2;
+    /* false = RNG-only structure positions, skip biome viability sampling */
+    bool biomeCheck = true;
 };
 
 template<typename T>
