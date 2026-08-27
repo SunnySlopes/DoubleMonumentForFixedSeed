@@ -130,7 +130,7 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
     int groupArea = monument_afk_coverage(pts, nn, MONUMENT_BOX, MONUMENT_BOX, &afkX, &afkZ);
 
     /* 三/四连面积过滤 */
-    if (groupArea < MIN_GROUP_AREA)
+    if (groupArea <= MIN_GROUP_AREA)
         return;
 
     /* 贡献过滤：去掉任一成员都必须使面积严格变小，否则该成员对最佳挂机点

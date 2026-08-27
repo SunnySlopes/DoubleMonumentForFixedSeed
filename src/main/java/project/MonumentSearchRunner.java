@@ -277,6 +277,10 @@ public class MonumentSearchRunner {
                         processed = lastProcessed.get();
                         total = lastTotal.get();
                     }
+                    
+                    if (total > 0 && processed >= total) {
+                        processed = total - 1;
+                    }
                     long elapsed = getElapsedMs();
                     long remaining = 0;
                     if (!isPaused && total > processed && processed > 0) {
