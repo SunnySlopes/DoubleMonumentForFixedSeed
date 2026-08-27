@@ -129,11 +129,12 @@ public class MonumentSearchRunner {
             Consumer<ProgressInfo> progressCallback,
             Consumer<String> resultCallback,
             boolean pauseOnPairFound,
+            int pairLevel,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
         if (isRunning && isPaused && threadCount > 0) {
             restartWithNewThreadCount(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback,
-                    resultCallback, pauseOnPairFound, resultFormatter, nativeErrorMessage);
+                    resultCallback, pauseOnPairFound, pairLevel, resultFormatter, nativeErrorMessage);
             return;
         }
         if (isRunning) {
@@ -142,7 +143,7 @@ public class MonumentSearchRunner {
 
         Thread t = new Thread(
                 () -> runSearch(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback, resultCallback,
-                        pauseOnPairFound, resultFormatter, nativeErrorMessage),
+                        pauseOnPairFound, pairLevel, resultFormatter, nativeErrorMessage),
                 "monument-search");
         t.setDaemon(true);
         searchThread = t;
@@ -162,13 +163,14 @@ public class MonumentSearchRunner {
             Consumer<ProgressInfo> progressCallback,
             Consumer<String> resultCallback,
             boolean pauseOnPairFound,
+            int pairLevel,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
         if (isRunning) {
             return;
         }
         runSearch(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback, resultCallback,
-                pauseOnPairFound, resultFormatter, nativeErrorMessage);
+                pauseOnPairFound, pairLevel, resultFormatter, nativeErrorMessage);
     }
 
     /** Blocks until the async search thread from {@link #startSearch} finishes. */
@@ -189,6 +191,7 @@ public class MonumentSearchRunner {
             Consumer<ProgressInfo> progressCallback,
             Consumer<String> resultCallback,
             boolean pauseOnPairFound,
+            int pairLevel,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
         stop();
@@ -201,7 +204,7 @@ public class MonumentSearchRunner {
         isRunning = false;
         isPaused = false;
         startSearch(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback, resultCallback,
-                pauseOnPairFound, resultFormatter, nativeErrorMessage);
+                pauseOnPairFound, pairLevel, resultFormatter, nativeErrorMessage);
     }
 
     private void runSearch(
@@ -214,6 +217,7 @@ public class MonumentSearchRunner {
             Consumer<ProgressInfo> progressCallback,
             Consumer<String> resultCallback,
             boolean pauseOnPairFound,
+            int pairLevel,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
         isRunning = true;
@@ -283,7 +287,7 @@ public class MonumentSearchRunner {
 
         try {
             int[] raw = MonumentFinderBridge.monumentSearch(
-                    seed, minX, maxX, minZ, maxZ, mc, threads, pauseOnPairFound);
+                    seed, minX, maxX, minZ, maxZ, mc, threads, pauseOnPairFound, pairLevel);
             pollIncrementalResults(resultCallback, resultFormatter);
             if (raw != null) {
                 emitRawResults(raw, resultCallback, resultFormatter);
@@ -340,12 +344,13 @@ public class MonumentSearchRunner {
             return;
         }
         for (int i = 0; i + MonumentFinderBridge.PAIR_STRIDE <= raw.length; i += MonumentFinderBridge.PAIR_STRIDE) {
-            int hangX = raw[i];
-            int hangZ = raw[i + 1];
+            int x = raw[i];
+            int z = raw[i + 1];
             int dx = raw[i + 2];
             int dz = raw[i + 3];
-            boolean low = raw[i + 4] != 0;
-            String line = resultFormatter.format(hangX, hangZ, dx, dz, low);
+            int count = raw[i + 4];
+            int area = raw[i + 5];
+            String line = resultFormatter.format(x, z, count, area, dx, dz);
             synchronized (emittedResults) {
                 if (!emittedResults.add(line)) {
                     continue;

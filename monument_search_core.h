@@ -7,6 +7,13 @@
 extern "C" {
 #endif
 
+/** cubiomes structure position (Pos from finders.h) — redeclared to avoid
+ *  pulling cubiomes headers into every consumer. */
+typedef struct MonumentBlockPos {
+    int x;
+    int z;
+} MonumentBlockPos;
+
 /** Opaque cubiomes Generator wrapper (defined only in .c). */
 typedef struct MonumentGenerator MonumentGenerator;
 
@@ -64,6 +71,30 @@ int monument_classify_ocean_type_g(
     int mc,
     int centerX,
     int centerZ);
+
+/**
+ * Usable spawning area for a group of n (1..4) monuments, evaluated with the
+ * horizontal 128-block spawning circle (no height dimension), mirroring
+ * cubiomes-viewer's getOptimalAfk(qs, 58, 0, 58, ...) call.
+ *
+ * Each monument contributes a 58x58 spawning box anchored at its position.
+ * Searches whole-block AFK positions for the maximum covered box blocks,
+ * seeded from pair midpoints and flood-filled (iteratively), ties resolved
+ * by averaging equally good positions (same as cubiomes quadbase.c).
+ *
+ * @p        : monument positions
+ * @n        : number of positions (1..4)
+ * @ax,az    : spawning box size (58, 58 for monuments)
+ * @outX,outZ: optional output of the optimal AFK block position
+ * @return   : number of spawning blocks covered from the best AFK point
+ */
+int monument_afk_coverage(
+    const MonumentBlockPos *p,
+    int n,
+    int ax,
+    int az,
+    int *outX,
+    int *outZ);
 
 #ifdef __cplusplus
 }

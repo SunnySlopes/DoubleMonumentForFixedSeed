@@ -29,10 +29,10 @@ The UI supports **Chinese / English** switching (single-seed tab). Default langu
 
 ```bash
 git submodule update --init --recursive
-./gradlew buildNative DoubleMonumentForFixedSeedJar
+./gradlew buildNative MultiMonumentFinderJar
 ```
 
-Output / 输出：`build/libs/DoubleMonumentForFixedSeed-2.0.jar`
+Output / 输出：`build/libs/MultiMonumentFinder-1.0.jar`
 
 On Windows with MSYS2, ensure `C:\msys64\ucrt64\bin` (or `mingw64\bin`) is on `PATH` when running Gradle.
 
@@ -43,7 +43,7 @@ Windows + MSYS2 环境下，运行 Gradle 前请将 `C:\msys64\ucrt64\bin`（或
 ## Run / 运行
 
 ```bash
-java -jar build/libs/DoubleMonumentForFixedSeed-2.0.jar
+java -jar build/libs/MultiMonumentFinder-1.0.jar
 ```
 
 Or use `run.bat` after building.  
@@ -54,7 +54,7 @@ The JAR embeds native libraries under `/native/{windows|linux|macos}/`. You can 
 JAR 内嵌原生库，路径为 `/native/{windows|linux|macos}/`。也可指定库路径运行：
 
 ```bash
-java -Djava.library.path=build/native -jar build/libs/DoubleMonumentForFixedSeed-2.0.jar
+java -Djava.library.path=build/native -jar build/libs/MultiMonumentFinder-1.0.jar
 ```
 
 ---
@@ -97,14 +97,14 @@ Default thread count is the number of CPU cores (capped at runtime). If you ente
 
 ### Tab 1: Single seed search / 单种子搜索
 
-| Field / 字段 | 中文 | English |
-|--------------|------|---------|
-| Seed | **种子** | **Seed** |
-| Threads | **线程数** | **Thread Count** |
-| Version | **版本** | **Version** |
-| Region | **MinX / MaxX / MinZ / MaxZ (×512)** | same |
-| Language | **语言** (Chinese / English) | **Language** |
-| Option | **找到符合条件的二联时立即暂停** | **Pause immediately when a valid pair is found** |
+| Field / 字段 | 中文                                   | English                                          |
+|------------|--------------------------------------|--------------------------------------------------|
+| Seed       | **种子**                               | **Seed**                                         |
+| Threads    | **线程数**                              | **Thread Count**                                 |
+| Version    | **版本**                               | **Version**                                      |
+| Region     | **MinX / MaxX / MinZ / MaxZ (×512)** | same                                             |
+| Language   | **语言** (Chinese / English)           | **Language**                                     |
+| Option     | **找到符合条件的多连时立即暂停**                   | **Pause immediately when a valid pair is found** |
 
 - Results format / 结果格式：`/tp x 50 z (dx=?, dz=? / dx=?, dz=?)`  
   Low-efficiency pairs append / 低效配对后缀：` - 效率会略微损失 / - slightly reduced efficiency`

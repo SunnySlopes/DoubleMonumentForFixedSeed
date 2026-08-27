@@ -56,24 +56,38 @@ public final class I18n {
         }
     }
 
-    public static String formatPair(int hangX, int hangZ, int dx, int dz, boolean lowEfficiency) {
-        return formatPair(hangX, hangZ, dx, dz, lowEfficiency, null);
+    /**
+     * Formats a search result line.
+     *
+     * @param x            output point (pair midpoint or group AFK point)
+     * @param z            output point (pair midpoint or group AFK point)
+     * @param count        monuments in the group (2/3/4)
+     * @param area         usable spawning area (blocks) covered from the best AFK point
+     * @param dx           pair: |dx| between the two monuments; group: bounding box width
+     * @param dz           pair: |dz| between the two monuments; group: bounding box height
+     * @param oceanTypeKey nullable biome type key ("cold"/"frozen"/"others")
+     */
+    public static String formatResult(int x, int z, int count, int area, int dx, int dz, String oceanTypeKey) {
+        StringBuilder info = new StringBuilder();
+        if (oceanTypeKey != null && !oceanTypeKey.isEmpty()) {
+            info.append("type=").append(get("result.oceanType." + oceanTypeKey)).append(' ');
+        }
+        info.append(formatArea(area));
+        MessageFormat mf;
+        Object[] args;
+        if (count == 2) {
+            // Use Locale.ROOT so coordinates never get thousand-separator commas (e.g. -1,024).
+            mf = new MessageFormat(messages.getString("result.tpFormat"), Locale.ROOT);
+            args = new Object[] {x, z, info.toString(), dx, dz};
+        } else {
+            mf = new MessageFormat(messages.getString("result.tpFormatGroup"), Locale.ROOT);
+            args = new Object[] {x, z, info.toString(), String.valueOf(count)};
+        }
+        return mf.format(args);
     }
 
-    public static String formatPair(int hangX, int hangZ, int dx, int dz, boolean lowEfficiency, String oceanTypeKey) {
-        // Use Locale.ROOT so coordinates never get thousand-separator commas (e.g. -1,024).
-        String base;
-        if (oceanTypeKey != null && !oceanTypeKey.isEmpty()) {
-            String typeLabel = get("result.oceanType." + oceanTypeKey);
-            MessageFormat mf = new MessageFormat(messages.getString("result.tpFormatWithType"), Locale.ROOT);
-            base = mf.format(new Object[] {hangX, hangZ, typeLabel, dx, dz});
-        } else {
-            MessageFormat mf = new MessageFormat(messages.getString("result.tpFormat"), Locale.ROOT);
-            base = mf.format(new Object[] {hangX, hangZ, dx, dz});
-        }
-        if (lowEfficiency) {
-            return base + get("result.lowEfficiencySuffix");
-        }
-        return base;
+    private static String formatArea(int area) {
+        MessageFormat mf = new MessageFormat(messages.getString("result.area"), Locale.ROOT);
+        return mf.format(new Object[] {area});
     }
 }

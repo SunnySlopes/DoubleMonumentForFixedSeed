@@ -1,12 +1,9 @@
-import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
-
 plugins {
     id 'java'
-    id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
 
 group = 'org.example'
-version = '2.1'
+version = '1.0'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -21,38 +18,42 @@ repositories {
     mavenCentral()
 }
 
+tasks.named('test') {
+    failOnNoDiscoveredTests = false
+}
+
 dependencies {
 }
 
-shadowJar {
-    archiveBaseName.set('DoubleMonument')
-    archiveClassifier.set('')
-    mergeServiceFiles()
-}
-
-tasks.register('DoubleMonumentForFixedSeedJar', ShadowJar) {
+tasks.register('MultiMonumentFinderJar', Jar) {
     group = 'build'
-    description = 'Creates a fat JAR for DoubleMonumentForFixedSeed'
-    archiveBaseName.set('DoubleMonumentForFixedSeed')
+    description = 'Creates a fat JAR for MultiMonumentFinder'
+    archiveBaseName.set('MultiMonumentFinder')
     archiveClassifier.set('')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     dependsOn classes
     from sourceSets.main.output
-    configurations = [project.configurations.runtimeClasspath]
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
     manifest {
         attributes 'Main-Class': 'project.Launcher'
     }
-    mergeServiceFiles()
     exclude 'module-info.class'
 }
 
 tasks.register('buildAllJars') {
     group = 'build'
     description = 'Builds executable JAR with native libraries'
-    dependsOn 'DoubleMonumentForFixedSeedJar'
+    dependsOn 'MultiMonumentFinderJar'
 }
 
 def msys2Path() {
-    def candidates = ['C:\\msys64\\ucrt64\\bin', 'C:\\msys64\\mingw64\\bin']
+    def candidates = [
+            'C:\\msys64\\ucrt64\\bin',
+            'C:\\msys64\\mingw64\\bin',
+            "${System.getenv('TEMP')}\\msys2-root\\msys64\\ucrt64\\bin"
+    ]
     return candidates.find { new File(it, 'gcc.exe').exists() } ?: ''
 }
 
@@ -224,6 +225,6 @@ tasks.named('processResources') {
     from(generatedNativeResourcesDir)
 }
 
-tasks.named('DoubleMonumentForFixedSeedJar') {
+tasks.named('MultiMonumentFinderJar') {
     dependsOn tasks.named('prepareNativeResources')
 }

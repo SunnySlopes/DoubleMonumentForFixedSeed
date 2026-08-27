@@ -13,20 +13,27 @@ struct Progress {
 };
 
 struct PairHit {
-    int hangX = 0;
-    int hangZ = 0;
+    /* output point: pair midpoint for count=2, optimal AFK point for 3/4 */
+    int x = 0;
+    int z = 0;
+    /* count=2: |dx|/|dz| between the two monuments;
+     * count=3/4: group bounding box width/height */
     int dx = 0;
     int dz = 0;
-    int lowEfficiency = 0;
+    /* number of monuments in the group (2/3/4) */
+    int count = 2;
+    /* usable spawning area (blocks) covered from the best AFK point,
+     * horizontal 128-block circle, 58x58 box per monument */
+    int area = 0;
 
     bool operator<(const PairHit &o) const noexcept;
 };
 
 inline bool PairHit::operator<(const PairHit &o) const noexcept
 {
-    if (hangX != o.hangX)
-        return hangX < o.hangX;
-    return hangZ < o.hangZ;
+    if (x != o.x)
+        return x < o.x;
+    return z < o.z;
 }
 
 struct MonumentSearchConfig {
@@ -37,6 +44,8 @@ struct MonumentSearchConfig {
     int maxZ = 0;
     int mc = 25;
     bool pauseOnPairFound = false;
+    /* requested group size: 2 = pairs, 3 = triples, 4 = quadruples */
+    int pairLevel = 2;
 };
 
 template<typename T>

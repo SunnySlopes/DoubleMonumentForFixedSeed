@@ -7,7 +7,9 @@
 #include <chrono>
 #include <climits>
 #include <cmath>
+#include <functional>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <unordered_set>
 #include <vector>
@@ -40,8 +42,15 @@ struct SearchContext {
     std::mutex monumentsMu;
     std::unordered_set<uint64_t> monumentKeys;
     std::vector<MonumentPos> monuments;
+    /* monuments found outside the search range via pair probing (still real,
+     * viable monuments — needed so triples/quads can span the search border) */
+    std::mutex outerMu;
+    std::unordered_set<uint64_t> outerKeys;
+    std::vector<MonumentPos> outerMonuments;
     std::mutex pairsMu;
     std::unordered_set<uint64_t> addedPairKeys;
+    /* group enumeration runs single-threaded after the region scan */
+    std::unordered_set<std::string> addedGroupKeys;
 };
 
 int defaultHwThreads()
@@ -125,12 +134,19 @@ void addPairResult(SearchContext &ctx, const MonumentPos &pos1, const MonumentPo
             return;
     }
 
+    /* in group mode (pairLevel >= 3) pairs are only intermediate bookkeeping;
+     * the actual results are the groups enumerated after the scan */
+    if (ctx.cfg.pairLevel != 2)
+        return;
+
     PairHit hit;
-    hit.hangX = (pos1.x + pos2.x) / 2;
-    hit.hangZ = (pos1.z + pos2.z) / 2;
+    hit.x = (pos1.x + pos2.x) / 2;
+    hit.z = (pos1.z + pos2.z) / 2;
     hit.dx = std::abs(pos2.x - pos1.x);
     hit.dz = std::abs(pos2.z - pos1.z);
-    hit.lowEfficiency = lowEfficiency ? 1 : 0;
+    hit.count = 2;
+    MonumentBlockPos pair[2] = {{pos1.x, pos1.z}, {pos2.x, pos2.z}};
+    hit.area = monument_afk_coverage(pair, 2, 58, 58, nullptr, nullptr);
     ctx.out->addResult(hit);
 
     if (ctx.cfg.pauseOnPairFound && !lowEfficiency && ctx.progress) {
@@ -168,6 +184,11 @@ void checkPairsWithOutsidePositions(
             }
 
             MonumentPos actual{actualX, actualZ};
+            {
+                std::lock_guard<std::mutex> lock(ctx.outerMu);
+                if (ctx.outerKeys.insert(posKey(actual.x, actual.z)).second)
+                    ctx.outerMonuments.push_back(actual);
+            }
             addPairResult(ctx, inRangePos, actual, check.isLowEfficiency);
         }
     }
@@ -175,6 +196,13 @@ void checkPairsWithOutsidePositions(
 
 void checkPairsIncremental(SearchContext &ctx, MonumentGenerator *g, const MonumentPos &newPos)
 {
+    if (ctx.cfg.pairLevel >= 3) {
+        /* group mode: skip pair judging, only probe outside positions */
+        if (isInSearchRange(ctx, newPos))
+            checkPairsWithOutsidePositions(ctx, g, newPos);
+        return;
+    }
+
     std::vector<MonumentPos> snapshot;
     {
         std::lock_guard<std::mutex> lock(ctx.monumentsMu);
@@ -223,6 +251,139 @@ void processRegion(SearchContext &ctx, MonumentGenerator *g, int regX, int regZ)
         return;
 
     tryAddMonument(ctx, g, monumentX, monumentZ);
+}
+
+/* ==================== group enumeration (triples / quads) ==================== */
+
+/* Two monuments can only share one spawning area if their boxes both reach a
+ * common 128-circle, bounding the centre distance well below this limit
+ * (2 * (128 spawn radius + 58 monument size), generous on purpose). */
+constexpr int GROUP_LINK_DIST_SQ = 372 * 372;
+constexpr int MONUMENT_BOX = 58;
+
+void processGroup(
+    SearchContext &ctx,
+    const std::vector<MonumentPos> &all,
+    const std::vector<int> &idx)
+{
+    std::string key;
+    for (int i : idx) {
+        key += std::to_string(all[i].x);
+        key += ',';
+        key += std::to_string(all[i].z);
+        key += ';';
+    }
+    if (!ctx.addedGroupKeys.insert(key).second)
+        return;
+
+    const int nn = (int) idx.size();
+    MonumentBlockPos pts[4];
+    for (int i = 0; i < nn; i++) {
+        pts[i].x = all[idx[i]].x;
+        pts[i].z = all[idx[i]].z;
+    }
+
+    int afkX = 0;
+    int afkZ = 0;
+    int groupArea = monument_afk_coverage(pts, nn, MONUMENT_BOX, MONUMENT_BOX, &afkX, &afkZ);
+
+    /* marginal-gain filter: a pseudo-group whose usable area is not at least
+     * 110% of its best (n-1)-subset is not worth reporting */
+    int bestSub = 0;
+    for (int skip = 0; skip < nn; skip++) {
+        MonumentBlockPos sub[3];
+        int m = 0;
+        for (int i = 0; i < nn; i++) {
+            if (i != skip)
+                sub[m++] = pts[i];
+        }
+        int a = monument_afk_coverage(sub, nn - 1, MONUMENT_BOX, MONUMENT_BOX, nullptr, nullptr);
+        if (a > bestSub)
+            bestSub = a;
+    }
+    if ((long long) groupArea * 10 <= (long long) bestSub * 11)
+        return;
+
+    PairHit hit;
+    hit.x = afkX;
+    hit.z = afkZ;
+    int minX = pts[0].x, maxX = pts[0].x, minZ = pts[0].z, maxZ = pts[0].z;
+    for (int i = 1; i < nn; i++) {
+        minX = std::min(minX, pts[i].x);
+        maxX = std::max(maxX, pts[i].x);
+        minZ = std::min(minZ, pts[i].z);
+        maxZ = std::max(maxZ, pts[i].z);
+    }
+    hit.dx = maxX - minX;
+    hit.dz = maxZ - minZ;
+    hit.count = nn;
+    hit.area = groupArea;
+    ctx.out->addResult(hit);
+}
+
+void enumerateGroups(SearchContext &ctx)
+{
+    const int n = ctx.cfg.pairLevel;
+    if (n != 3 && n != 4)
+        return;
+
+    std::vector<MonumentPos> all;
+    {
+        std::lock_guard<std::mutex> lockA(ctx.monumentsMu);
+        all = ctx.monuments;
+        std::lock_guard<std::mutex> lockB(ctx.outerMu);
+        all.insert(all.end(), ctx.outerMonuments.begin(), ctx.outerMonuments.end());
+    }
+    std::sort(all.begin(), all.end(), [](const MonumentPos &a, const MonumentPos &b) {
+        return a.x != b.x ? a.x < b.x : a.z < b.z;
+    });
+    all.erase(std::unique(all.begin(), all.end(), [](const MonumentPos &a, const MonumentPos &b) {
+                  return a.x == b.x && a.z == b.z;
+              }),
+              all.end());
+
+    const int V = (int) all.size();
+    if (V < n)
+        return;
+
+    /* loose adjacency: members of a shareable group must be close together */
+    std::vector<std::vector<char>> linked(V, std::vector<char>(V, 0));
+    for (int i = 0; i < V; i++) {
+        for (int j = i + 1; j < V; j++) {
+            int dx = std::abs(all[j].x - all[i].x);
+            int dz = std::abs(all[j].z - all[i].z);
+            if (dx % 16 != 0 || dz % 16 != 0)
+                continue;
+            if (dx * dx + dz * dz > GROUP_LINK_DIST_SQ)
+                continue;
+            linked[i][j] = 1;
+            linked[j][i] = 1;
+        }
+    }
+
+    std::vector<int> cur;
+    cur.reserve(n);
+    std::function<void(int)> extend = [&](int start) {
+        if ((int) cur.size() == n) {
+            processGroup(ctx, all, cur);
+            return;
+        }
+        for (int i = start; i < V; i++) {
+            bool ok = true;
+            for (int m : cur) {
+                if (!linked[m][i]) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (!ok)
+                continue;
+            cur.push_back(i);
+            extend(i + 1);
+            cur.pop_back();
+        }
+    };
+    extend(0);
 }
 
 } // namespace
@@ -309,6 +470,12 @@ void runMonumentSearch(
                 monument_generator_free(g);
             });
         }
+    }
+
+    /* group mode: enumerate triples/quads from all monuments found (runs
+     * single-threaded; skipped when the search was stopped) */
+    if (ctx.cfg.pairLevel >= 3 && (!progress || !progress->try_stop.load())) {
+        enumerateGroups(ctx);
     }
 
     if (progress) {

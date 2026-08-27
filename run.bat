@@ -1,2 +1,2 @@
-java -jar build\libs\DoubleMonumentForFixedSeed-1.2.jar
+java -jar build\libs\MultiMonumentFinder-1.0.jar
 pause

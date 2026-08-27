@@ -31,8 +31,8 @@ public final class MonumentFinderBridge {
             "26.2", "26.1", "1.21.1", "1.20.1", "1.19.2", "1.18.2"
     };
 
-    /** ints per pair result: hangX, hangZ, dx, dz, lowEfficiencyFlag */
-    public static final int PAIR_STRIDE = 5;
+    /** ints per result: x, z, dx, dz, count(2/3/4), area */
+    public static final int PAIR_STRIDE = 6;
 
     static {
         loadNativeLibrary();
@@ -145,7 +145,8 @@ public final class MonumentFinderBridge {
             int maxZ,
             int mc,
             int numThreads,
-            boolean pauseOnPairFound);
+            boolean pauseOnPairFound,
+            int pairLevel);
 
     /** @return [processed, total, status] or null */
     public static native int[] getSearchProgress();

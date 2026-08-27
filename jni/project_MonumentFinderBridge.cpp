@@ -11,14 +11,16 @@ static ThreadSafeResults<PairHit> g_results{};
 
 static std::vector<jint> pairsToFlatInts(const std::vector<PairHit> &hits)
 {
+    /* stride: x, z, dx, dz, count, area */
     std::vector<jint> flat;
-    flat.reserve(hits.size() * 5);
+    flat.reserve(hits.size() * 6);
     for (const PairHit &h : hits) {
-        flat.push_back(h.hangX);
-        flat.push_back(h.hangZ);
+        flat.push_back(h.x);
+        flat.push_back(h.z);
         flat.push_back(h.dx);
         flat.push_back(h.dz);
-        flat.push_back(h.lowEfficiency);
+        flat.push_back(h.count);
+        flat.push_back(h.area);
     }
     return flat;
 }
@@ -37,7 +39,7 @@ static jintArray makeIntArray(JNIEnv *env, const std::vector<jint> &data)
 
 JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_monumentSearch
   (JNIEnv *env, jclass, jlong seed, jint minX, jint maxX, jint minZ, jint maxZ, jint mc,
-   jint numThreads, jboolean pauseOnPairFound) {
+   jint numThreads, jboolean pauseOnPairFound, jint pairLevel) {
     MonumentSearchConfig cfg;
     cfg.seed = (uint64_t) seed;
     cfg.minX = minX;
@@ -46,6 +48,7 @@ JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_monumentSearch
     cfg.maxZ = maxZ;
     cfg.mc = mc;
     cfg.pauseOnPairFound = pauseOnPairFound == JNI_TRUE;
+    cfg.pairLevel = pairLevel >= 2 && pairLevel <= 4 ? pairLevel : 2;
 
     g_results.clear();
     g_progress.current = 0;

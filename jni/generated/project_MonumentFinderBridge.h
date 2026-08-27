@@ -22,14 +22,14 @@ extern "C" {
 #undef project_MonumentFinderBridge_MC_26_2
 #define project_MonumentFinderBridge_MC_26_2 34L
 #undef project_MonumentFinderBridge_PAIR_STRIDE
-#define project_MonumentFinderBridge_PAIR_STRIDE 5L
+#define project_MonumentFinderBridge_PAIR_STRIDE 6L
 /*
  * Class:     project_MonumentFinderBridge
  * Method:    monumentSearch
- * Signature: (JIIIIIIZ)[I
+ * Signature: (JIIIIIIZI)[I
  */
 JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_monumentSearch
-  (JNIEnv *, jclass, jlong, jint, jint, jint, jint, jint, jint, jboolean);
+  (JNIEnv *, jclass, jlong, jint, jint, jint, jint, jint, jint, jboolean, jint);
 
 /*
  * Class:     project_MonumentFinderBridge
