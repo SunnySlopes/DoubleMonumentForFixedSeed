@@ -8,6 +8,7 @@
 #include <limits.h>
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 enum {
     OCEAN_TYPE_OTHERS = 0,
@@ -215,6 +216,15 @@ int monument_classify_ocean_type(
  * spawning block within euclidean distance 128 on the horizontal plane. */
 static const double AFK_RSQ = 128.0 * 128.0;
 
+/* Monument spawning box anchor. getStructurePos returns the structure-region
+ * chunk corner; the in-game monument centre sits at corner + 8 and the 58x58
+ * bounding box extends 29 blocks north-west and 28 blocks south-east of it:
+ * [pos + 8 - 29, pos + 8 + 28] = [pos - 21, pos + 36]. (In-game verified.)
+ * Area is invariant to any rigid anchor shift, but the reported AFK point is
+ * only correct with this anchor. */
+#define AFK_BOX_LO(ax) (8 - ((ax) + 1) / 2)        /* -21 for 58 */
+#define AFK_BOX_HI(ax) (AFK_BOX_LO(ax) + (ax) - 1) /* +36 for 58 */
+
 typedef struct {
     const MonumentBlockPos *p;
     int n;
@@ -236,8 +246,8 @@ static int afk_blocks_in_range(
 {
     int cnt = 0;
     for (int i = 0; i < n; i++) {
-        double dx = (double)p[i].x - x;
-        double dz = (double)p[i].z - z;
+        double dx = (double)p[i].x + AFK_BOX_LO(ax) - x;
+        double dz = (double)p[i].z + AFK_BOX_LO(az) - z;
         for (int px = 0; px < ax; px++) {
             for (int pz = 0; pz < az; pz++) {
                 double ddx = px + dx;
@@ -297,6 +307,125 @@ static void afk_flood(AfkMeta *d, int sx, int sz)
     free(stack);
 }
 
+/* Exact full-window coverage scan for n >= 3 groups.
+ *
+ * The flood fill used for pairs only walks non-decreasing plateaus, so a
+ * triangle/quad whose global optimum is separated from every midpoint or
+ * centroid seed by a dip would be scored with a local maximum instead
+ * (observed: 7895 reported where far more was achievable).  This path
+ * evaluates every window cell exactly:
+ *
+ *   - window [x0, x0+w) x [z0, z0+h) provably contains the optimum: clamping
+ *     an outside candidate towards the group bounding box never decreases any
+ *     box-row interval intersection;
+ *   - row decomposition keeps it cheap: a box block-row at z only reaches
+ *     candidate rows pz with |pz - z| <= 128, and within one (box row,
+ *     candidate row) pair the per-column contribution is the length of the
+ *     intersection [max(bx, px-R), min(bx+ax-1, px+R)], with
+ *     R = floor(sqrt(128^2 - dz^2)) precomputed per dz. */
+static void afk_coverage_exact(
+    const MonumentBlockPos *p,
+    int n,
+    int x0,
+    int z0,
+    int w,
+    int h,
+    int ax,
+    int az,
+    MonumentBlockPos *out,
+    int *outCnt)
+{
+    const int RMAX = 128;
+    int rt[2 * RMAX + 1];
+    for (int dz = -RMAX; dz <= RMAX; dz++)
+        rt[dz + RMAX] = (int) sqrt((double) RMAX * RMAX - (double) dz * dz);
+
+    int *cov = (int *) malloc(sizeof(int) * (size_t) w * (size_t) h);
+    int *stack = (int *) malloc(sizeof(int) * (size_t) w * (size_t) h);
+    if (!cov || !stack) {
+        free(cov);
+        free(stack);
+        return; /* keep the caller's single-box fallback */
+    }
+    memset(cov, 0, sizeof(int) * (size_t) w * (size_t) h);
+
+    for (int i = 0; i < n; i++) {
+        const int bx = p[i].x + AFK_BOX_LO(ax);
+        const int bx1 = p[i].x + AFK_BOX_HI(ax);
+        for (int j = 0; j < az; j++) { /* box block-rows */
+            const int rowz = p[i].z + AFK_BOX_LO(az) + j;
+            int pz = rowz - RMAX > z0 ? rowz - RMAX : z0;
+            const int pzHi = rowz + RMAX < z0 + h - 1 ? rowz + RMAX : z0 + h - 1;
+            for (; pz <= pzHi; pz++) {
+                const int R = rt[(pz - rowz) + RMAX];
+                int px = bx - R > x0 ? bx - R : x0;
+                const int pxHi = bx1 + R < x0 + w - 1 ? bx1 + R : x0 + w - 1;
+                int *crow = cov + (size_t) (pz - z0) * w;
+                for (; px <= pxHi; px++) {
+                    int lo = px - R > bx ? px - R : bx;
+                    int hi = px + R < bx1 ? px + R : bx1;
+                    crow[px - x0] += hi - lo + 1;
+                }
+            }
+        }
+    }
+
+    int best = 0;
+    int bIdx = -1;
+    for (int k = 0; k < w * h; k++) {
+        if (cov[k] > best) {
+            best = cov[k];
+            bIdx = k;
+        }
+    }
+
+    if (bIdx < 0) {
+        free(cov);
+        free(stack);
+        return;
+    }
+
+    /* average the plateau of globally optimal cells connected to bIdx
+     * (disconnected maxima must not be averaged into the same point) */
+    int64_t sumx = 0;
+    int64_t sumz = 0;
+    int sumn = 0;
+    int top = 0;
+    stack[top++] = bIdx;
+    cov[bIdx] = -1;
+    while (top > 0) {
+        int idx = stack[--top];
+        int x = idx % w;
+        int z = idx / w;
+        sumx += x0 + x;
+        sumz += z0 + z;
+        sumn++;
+        if (x > 0 && cov[idx - 1] == best) {
+            cov[idx - 1] = -1;
+            stack[top++] = idx - 1;
+        }
+        if (x < w - 1 && cov[idx + 1] == best) {
+            cov[idx + 1] = -1;
+            stack[top++] = idx + 1;
+        }
+        if (z > 0 && cov[idx - w] == best) {
+            cov[idx - w] = -1;
+            stack[top++] = idx - w;
+        }
+        if (z < h - 1 && cov[idx + w] == best) {
+            cov[idx + w] = -1;
+            stack[top++] = idx + w;
+        }
+    }
+
+    free(cov);
+    free(stack);
+
+    out->x = (int) lround((double) sumx / sumn);
+    out->z = (int) lround((double) sumz / sumn);
+    *outCnt = best;
+}
+
 int monument_afk_coverage(
     const MonumentBlockPos *p,
     int n,
@@ -308,6 +437,7 @@ int monument_afk_coverage(
     if (!p || n < 1 || n > 4 || ax <= 0 || az <= 0)
         return 0;
 
+    /* window over the box extents: [pos + 9 - ax, pos + 8] per axis */
     int minX = INT_MAX, minZ = INT_MAX, maxX = INT_MIN, maxZ = INT_MIN;
     for (int i = 0; i < n; i++) {
         if (p[i].x < minX) minX = p[i].x;
@@ -315,13 +445,28 @@ int monument_afk_coverage(
         if (p[i].x > maxX) maxX = p[i].x;
         if (p[i].z > maxZ) maxZ = p[i].z;
     }
-    int w = maxX - minX + ax;
-    int h = maxZ - minZ + az;
+    minX += AFK_BOX_LO(ax);
+    minZ += AFK_BOX_LO(az);
+    maxX += AFK_BOX_HI(ax);
+    maxZ += AFK_BOX_HI(az);
+    int w = maxX - minX + 1;
+    int h = maxZ - minZ + 1;
 
-    MonumentBlockPos afk = {p[0].x + ax / 2, p[0].z + az / 2};
+    MonumentBlockPos afk = {p[0].x + AFK_BOX_LO(ax) + ax / 2,
+                            p[0].z + AFK_BOX_LO(az) + az / 2};
     int cnt = ax * az;
 
     if (w < 1 || h < 1) {
+        if (outX) *outX = afk.x;
+        if (outZ) *outZ = afk.z;
+        return cnt;
+    }
+
+    /* n >= 3: exact full-window scan. The plateau-limited flood fill below
+     * cannot cross a dip, so for triangles/quads it can report a local
+     * maximum instead of the global optimum. */
+    if (n >= 3) {
+        afk_coverage_exact(p, n, minX, minZ, w, h, ax, az, &afk, &cnt);
         if (outX) *outX = afk.x;
         if (outZ) *outZ = afk.z;
         return cnt;
@@ -345,48 +490,18 @@ int monument_afk_coverage(
     d.ax = ax;
     d.az = az;
 
-    /* seed candidates: midpoints of every pair of structures (cubiomes uses
-     * the same six midpoints for quads), plus 3/4-point centroids. For a
-     * triangle group the true optimum generally does not lie on any pair
-     * midpoint, and the flood fill cannot leave a two-box plateau to reach
-     * it -- the centroid seeds bridge that gap. */
-    MonumentBlockPos dsp[11];
+    /* seed candidates for pairs: the pair midpoint. The optimum of two boxes
+     * lies on the segment between the centers, which the plateau walk from
+     * the midpoint covers completely. */
+    MonumentBlockPos dsp[1];
     int ndsp = 0;
-    for (int i = 0; i < n && ndsp < 11; i++) {
-        for (int j = i + 1; j < n && ndsp < 11; j++) {
-            dsp[ndsp].x = (p[i].x + p[j].x) / 2;
-            dsp[ndsp].z = (p[i].z + p[j].z) / 2;
-            ndsp++;
-        }
-    }
-    if (n >= 3 && ndsp < 11) {
-        int sx = 0;
-        int sz = 0;
-        for (int i = 0; i < n; i++) {
-            sx += p[i].x;
-            sz += p[i].z;
-        }
-        dsp[ndsp].x = sx / n;
-        dsp[ndsp].z = sz / n;
-        ndsp++;
-    }
-    if (n == 4) {
-        for (int skip = 0; skip < n && ndsp < 11; skip++) {
-            int sx = 0;
-            int sz = 0;
-            for (int i = 0; i < n; i++) {
-                if (i != skip) {
-                    sx += p[i].x;
-                    sz += p[i].z;
-                }
-            }
-            dsp[ndsp].x = sx / 3;
-            dsp[ndsp].z = sz / 3;
-            ndsp++;
-        }
+    if (n == 2) {
+        dsp[0].x = (p[0].x + p[1].x) / 2;
+        dsp[0].z = (p[0].z + p[1].z) / 2;
+        ndsp = 1;
     }
 
-    int v[11] = {0};
+    int v[1] = {0};
     for (int i = 0; i < ndsp; i++)
         v[i] = afk_blocks_in_range(p, n, dsp[i].x, dsp[i].z, ax, az);
 

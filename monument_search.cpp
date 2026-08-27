@@ -92,11 +92,13 @@ PairCheckResult checkCanFormPair(const MonumentPos &pos1, const MonumentPos &pos
 constexpr int GROUP_LINK_DIST_SQ = 372 * 372;
 constexpr int MONUMENT_BOX = 58;
 
+/* 过滤三/四连的最小可用面积：一个二连最多覆盖 2 个完整刷怪箱 */
+constexpr int MIN_GROUP_AREA = 2 * MONUMENT_BOX * MONUMENT_BOX;
+
 /* ==================== geometry-first chunk scan ==================== */
 
 /* 分块大小（区域数）。块内 + 1 圈 halo 的结构位置只靠 RNG 生成（廉价），
- * 只有几何预筛通过的候选才做昂贵的群系采样/挂机面积计算。
- *
+ * 只有几何预筛通过的候选才做群系采样/挂机面积计算。
  * 无全局去重的正确性：任何有效组的成员两两中心距 <= 372 < 512（一个区域），
  * 因此整组必然落在"组内字典序最小的搜索范围内成员"所在分块的窗口里；只在
  * 该成员为块内区域时输出一次，既不重复也不遗漏，跨搜索边界的组由 halo
@@ -126,6 +128,10 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
     int afkX = 0;
     int afkZ = 0;
     int groupArea = monument_afk_coverage(pts, nn, MONUMENT_BOX, MONUMENT_BOX, &afkX, &afkZ);
+
+    /* 三/四连面积过滤 */
+    if (groupArea < MIN_GROUP_AREA)
+        return;
 
     /* 贡献过滤：去掉任一成员都必须使面积严格变小，否则该成员对最佳挂机点
      * 贡献为 0，整个组实质上是更小的组（伪三/四连），不输出 */
