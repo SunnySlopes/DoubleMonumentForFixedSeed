@@ -9,13 +9,12 @@
 static Progress g_progress{};
 static ThreadSafeResults<PairHit> g_results{};
 
-/* 结果队列上限：防止几何-only（不勾群系检查）大范围搜索时结果无限膨胀。
- * 分块按距搜索中心排序，超限后保留的是靠中心的候选 */
+// Result queue cap: geometry-only searches on huge ranges would otherwise grow unbounded; chunks are centre-sorted, so the kept candidates are the central ones.
 static constexpr size_t kMaxQueuedResults = 20000;
 
 static std::vector<jint> pairsToFlatInts(const std::vector<PairHit> &hits)
 {
-    /* stride: x, z, dx, dz, count, area */
+    // stride: x, z, dx, dz, count, area
     std::vector<jint> flat;
     flat.reserve(hits.size() * 6);
     for (const PairHit &h : hits) {
@@ -43,7 +42,8 @@ static jintArray makeIntArray(JNIEnv *env, const std::vector<jint> &data)
 
 JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_monumentSearch
   (JNIEnv *env, jclass, jlong seed, jint minX, jint maxX, jint minZ, jint maxZ, jint mc,
-   jint numThreads, jboolean pauseOnPairFound, jint pairLevel, jboolean biomeCheck) {
+   jint numThreads, jboolean pauseOnPairFound, jint pairLevel, jboolean biomeCheck,
+   jint minGroupArea) {
     MonumentSearchConfig cfg;
     cfg.seed = (uint64_t) seed;
     cfg.minX = minX;
@@ -54,12 +54,15 @@ JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_monumentSearch
     cfg.pauseOnPairFound = pauseOnPairFound == JNI_TRUE;
     cfg.pairLevel = pairLevel >= 2 && pairLevel <= 4 ? pairLevel : 2;
     cfg.biomeCheck = biomeCheck == JNI_TRUE;
+    cfg.minGroupArea = minGroupArea > 0 ? minGroupArea : 2 * 58 * 58;
 
     g_results.clear();
     g_results.setLimit(kMaxQueuedResults);
     g_progress.current = 0;
     g_progress.total = 0;
     g_progress.status = 0;
+    g_progress.combosDone = 0;
+    g_progress.combosTotal = 0;
     g_progress.try_pause = false;
     g_progress.try_stop = false;
 
@@ -80,15 +83,18 @@ JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_getSearchProgress(
     if (g_progress.total.load() == 0 && g_progress.status.load() == 0)
         return nullptr;
 
-    jint data[3] = {
+    // stride: [current, total, status, combosDone, combosTotal]
+    jint data[5] = {
         g_progress.current.load(),
         g_progress.total.load(),
         g_progress.status.load(),
+        g_progress.combosDone.load(),
+        g_progress.combosTotal.load(),
     };
-    jintArray arr = env->NewIntArray(3);
+    jintArray arr = env->NewIntArray(5);
     if (arr == nullptr)
         return nullptr;
-    env->SetIntArrayRegion(arr, 0, 3, data);
+    env->SetIntArrayRegion(arr, 0, 5, data);
     return arr;
 }
 

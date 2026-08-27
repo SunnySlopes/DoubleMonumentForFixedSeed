@@ -57,15 +57,8 @@ public final class I18n {
     }
 
     /**
-     * Formats a search result line.
-     *
-     * @param x            output point (pair midpoint or group AFK point)
-     * @param z            output point (pair midpoint or group AFK point)
-     * @param count        monuments in the group (2/3/4)
-     * @param area         usable spawning area (blocks) covered from the best AFK point
-     * @param dx           pair: |dx| between the two monuments; group: bounding box width
-     * @param dz           pair: |dz| between the two monuments; group: bounding box height
-     * @param oceanTypeKey nullable biome type key ("cold"/"frozen"/"others")
+     * Formats a result line: x/z output point, count group size (2/3/4), area usable blocks,
+     * dx/dz unused (formatter compatibility), oceanTypeKey nullable biome type.
      */
     public static String formatResult(int x, int z, int count, int area, int dx, int dz, String oceanTypeKey) {
         StringBuilder info = new StringBuilder();
@@ -78,7 +71,7 @@ public final class I18n {
         if (count == 2) {
             // Use Locale.ROOT so coordinates never get thousand-separator commas (e.g. -1,024).
             mf = new MessageFormat(messages.getString("result.tpFormat"), Locale.ROOT);
-            args = new Object[] {x, z, info.toString(), dx, dz};
+            args = new Object[] {x, z, info.toString()};
         } else {
             mf = new MessageFormat(messages.getString("result.tpFormatGroup"), Locale.ROOT);
             args = new Object[] {x, z, info.toString(), String.valueOf(count)};

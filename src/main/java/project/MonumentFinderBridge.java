@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * JNI bridge for monument pair search (cubiomes).
+ * JNI bridge for monument group search (cubiomes).
  */
 public final class MonumentFinderBridge {
 
@@ -45,9 +45,7 @@ public final class MonumentFinderBridge {
         try {
             System.loadLibrary("monumentFinderLibJ");
             loaded = true;
-            return;
-        } catch (UnsatisfiedLinkError e) {
-            UnsatisfiedLinkError firstError = e;
+        } catch (UnsatisfiedLinkError firstError) {
             if (tryLoadFromBundledResources()) {
                 loaded = true;
                 return;
@@ -147,9 +145,10 @@ public final class MonumentFinderBridge {
             int numThreads,
             boolean pauseOnPairFound,
             int pairLevel,
-            boolean biomeCheck);
+            boolean biomeCheck,
+            int minGroupArea);
 
-    /** @return [processed, total, status] or null */
+    /** @return [processed, total, status, combosDone, combosTotal] or null */
     public static native int[] getSearchProgress();
 
     public static native int[] getNowResult();

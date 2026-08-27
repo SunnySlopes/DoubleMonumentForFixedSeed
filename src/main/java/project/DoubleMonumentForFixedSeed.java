@@ -4,16 +4,24 @@ import javax.swing.*;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
+/**
+ * Swing GUI for finding ocean monument pairs/groups (pair level 2-4) on a fixed seed.
+ */
 public class DoubleMonumentForFixedSeed extends JFrame {
-    // 默认值（128x128的范围）
+    private static final Logger LOGGER = Logger.getLogger(DoubleMonumentForFixedSeed.class.getName());
+    // Default search area: 128x128
     private static final int DEFAULT_MIN_X = -128;
     private static final int DEFAULT_MAX_X = 128;
     private static final int DEFAULT_MIN_Z = -128;
     private static final int DEFAULT_MAX_Z = 128;
-    // 第二个tab的默认值（16x16的范围）
+    // Batch tab default search area: 16x16
     private static final int BATCH_DEFAULT_MIN_X = -16;
     private static final int BATCH_DEFAULT_MAX_X = 16;
     private static final int BATCH_DEFAULT_MIN_Z = -16;
@@ -21,6 +29,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
 
     private static final int WORLD_BOUND = 58594;
     private static final int DEFAULT_THREAD_COUNT = Runtime.getRuntime().availableProcessors();
+    /** Min usable area threshold for 3/4 pair groups (default = optimal 2-pair area) */
+    private static final int DEFAULT_MIN_GROUP_AREA = 2 * 58 * 58;
+    /** Manual threshold bounds: lower = optimal 2-pair area, upper = theoretical 4-pair max */
+    private static final int MIN_GROUP_AREA_MIN = 2 * 58 * 58;
+    private static final int MIN_GROUP_AREA_MAX = 4 * 58 * 58 - 1;
 
     private JTabbedPane tabbedPane;
     private JComboBox<String> languageComboBox;
@@ -29,6 +42,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JLabel searchVersionLabel;
     private JLabel searchPairLevelLabel;
     private JComboBox<String> pairLevelComboBox;
+    private JLabel searchMinGroupAreaLabel;
     private JLabel searchMinXLabel;
     private JLabel searchMaxXLabel;
     private JLabel searchMinZLabel;
@@ -41,6 +55,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JLabel batchVersionLabel;
     private JLabel batchPairLevelLabel;
     private JComboBox<String> batchPairLevelComboBox;
+    private JLabel batchMinGroupAreaLabel;
     private JLabel batchMinXLabel;
     private JLabel batchMaxXLabel;
     private JLabel batchMinZLabel;
@@ -50,6 +65,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
 
     private JTextField searchSeedField;
     private JTextField searchThreadCountField;
+    private JTextField searchMinGroupAreaField;
     private JComboBox<String> versionComboBox;
     private JCheckBox pauseOnPairFoundCheckBox;
     private JCheckBox biomeCheckCheckBox;
@@ -65,6 +81,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JButton searchExportButton;
     private JButton searchSortButton;
     private JProgressBar searchProgressBar;
+    private JProgressBar searchComboProgressBar;
     private JLabel searchElapsedTimeLabel;
     private JLabel searchRemainingTimeLabel;
     private JTextArea searchResultArea;
@@ -80,10 +97,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private long formatContextSeed = 0;
     private int formatContextMc = MonumentFinderBridge.MC_26_2;
     
-    // 第二个tab的组件
+    // Batch tab components
     private JButton batchImportButton;
     private JLabel batchSeedFileLabel;
     private JTextField batchThreadCountField;
+    private JTextField batchMinGroupAreaField;
     private JComboBox<String> batchVersionComboBox;
     private JTextField batchMinXField;
     private JTextField batchMaxXField;
@@ -97,16 +115,18 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JButton batchExportSeedsButton;
     private JButton batchSortButton;
     private JProgressBar batchProgressBar;
+    private JProgressBar batchComboProgressBar;
     private JLabel batchElapsedTimeLabel;
     private JLabel batchRemainingTimeLabel;
     private JTextArea batchResultArea;
     private volatile boolean isBatchSearchRunning = false;
     private volatile boolean isBatchSearchPaused = false;
+    /** Monitor for the batch pause wait loop; notifyAll on pause state changes instead of sleep polling */
+    private final Object batchPauseMonitor = new Object();
     private MonumentSearchRunner currentBatchSearcher = null;
     private List<Long> batchSeedList = new ArrayList<>();
     private String batchSeedFileName = "";
     
-    // 加载的字体
     private Font loadedFont = null;
 
     public DoubleMonumentForFixedSeed() {
@@ -115,25 +135,27 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
 
-        // 设置窗口图标
         setWindowIcon();
 
-        // 设置中文字体
         setChineseFont();
 
-        // 创建标签页
         tabbedPane = new JTabbedPane();
         tabbedPane.setFont(getLoadedFont());
 
-        // 第一个tab：单种子搜索
+        // Tab 1: single-seed search
         JPanel searchPanel = createSearchPanel();
         tabbedPane.addTab(getString("tab.singleSeedSearch"), searchPanel);
 
-        // 第二个tab：批量种子搜索
+        // Tab 2: batch seed search
         JPanel batchPanel = createBatchSearchPanel();
         tabbedPane.addTab(getString("tab.batchSeedSearch"), batchPanel);
 
         add(tabbedPane, BorderLayout.CENTER);
+
+        // Restore persisted UI options (language, seed, threads, version, pair level, area, checkboxes)
+        loadUiPreferences();
+
+        Runtime.getRuntime().addShutdownHook(new Thread(this::saveUiPreferences));
 
         pack();
         setSize(1200, 800);
@@ -181,25 +203,174 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         return (index >= 0 && index <= 2) ? index + 2 : 2;
     }
 
+    // ==================== UI option persistence ====================
+
+    private java.util.prefs.Preferences uiPrefs() {
+        return java.util.prefs.Preferences.userNodeForPackage(DoubleMonumentForFixedSeed.class);
+    }
+
+    private static void putText(java.util.prefs.Preferences p, String key, JTextField f) {
+        if (f != null) {
+            p.put(key, f.getText().trim());
+        }
+    }
+
+    private static void putCombo(java.util.prefs.Preferences p, String key, JComboBox<String> c) {
+        if (c != null && c.getSelectedIndex() >= 0) {
+            p.putInt(key, c.getSelectedIndex());
+        }
+    }
+
+    private static void getText(java.util.prefs.Preferences p, String key, JTextField f) {
+        if (f == null) {
+            return;
+        }
+        String v = p.get(key, null);
+        if (v != null && !v.isEmpty()) {
+            f.setText(v);
+        }
+    }
+
+    private static void getCombo(java.util.prefs.Preferences p, String key, JComboBox<String> c) {
+        if (c == null) {
+            return;
+        }
+        int i = p.getInt(key, -1);
+        if (i >= 0 && i < c.getItemCount()) {
+            c.setSelectedIndex(i);
+        }
+    }
+
+    private static void getBool(java.util.prefs.Preferences p, String key, JCheckBox c) {
+        if (c != null) {
+            c.setSelected(p.getBoolean(key, c.isSelected()));
+        }
+    }
+
+    private void saveUiPreferences() {
+        try {
+            java.util.prefs.Preferences p = uiPrefs();
+            putCombo(p, "lang", languageComboBox);
+            putText(p, "s.seed", searchSeedField);
+            putText(p, "s.threads", searchThreadCountField);
+            putCombo(p, "s.version", versionComboBox);
+            putCombo(p, "s.pair", pairLevelComboBox);
+            putText(p, "s.minArea", searchMinGroupAreaField);
+            putText(p, "s.minX", minXField);
+            putText(p, "s.maxX", maxXField);
+            putText(p, "s.minZ", minZField);
+            putText(p, "s.maxZ", maxZField);
+            if (pauseOnPairFoundCheckBox != null) {
+                p.putBoolean("s.pause", pauseOnPairFoundCheckBox.isSelected());
+            }
+            if (biomeCheckCheckBox != null) {
+                p.putBoolean("s.biome", biomeCheckCheckBox.isSelected());
+            }
+            putText(p, "b.threads", batchThreadCountField);
+            putCombo(p, "b.version", batchVersionComboBox);
+            putCombo(p, "b.pair", batchPairLevelComboBox);
+            putText(p, "b.minArea", batchMinGroupAreaField);
+            putText(p, "b.minX", batchMinXField);
+            putText(p, "b.maxX", batchMaxXField);
+            putText(p, "b.minZ", batchMinZField);
+            putText(p, "b.maxZ", batchMaxZField);
+            if (batchBiomeCheckCheckBox != null) {
+                p.putBoolean("b.biome", batchBiomeCheckCheckBox.isSelected());
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void loadUiPreferences() {
+        try {
+            java.util.prefs.Preferences p = uiPrefs();
+            // Language first: setSelectedIndex fires changeLanguage to refresh all texts
+            getCombo(p, "lang", languageComboBox);
+            getText(p, "s.seed", searchSeedField);
+            getText(p, "s.threads", searchThreadCountField);
+            getCombo(p, "s.version", versionComboBox);
+            getCombo(p, "s.pair", pairLevelComboBox);
+            getText(p, "s.minArea", searchMinGroupAreaField);
+            getText(p, "s.minX", minXField);
+            getText(p, "s.maxX", maxXField);
+            getText(p, "s.minZ", minZField);
+            getText(p, "s.maxZ", maxZField);
+            getBool(p, "s.pause", pauseOnPairFoundCheckBox);
+            getBool(p, "s.biome", biomeCheckCheckBox);
+            getText(p, "b.threads", batchThreadCountField);
+            getCombo(p, "b.version", batchVersionComboBox);
+            getCombo(p, "b.pair", batchPairLevelComboBox);
+            getText(p, "b.minArea", batchMinGroupAreaField);
+            getText(p, "b.minX", batchMinXField);
+            getText(p, "b.maxX", batchMaxXField);
+            getText(p, "b.minZ", batchMinZField);
+            getText(p, "b.maxZ", batchMaxZField);
+            getBool(p, "b.biome", batchBiomeCheckCheckBox);
+        } catch (Throwable ignored) {
+        }
+        // Sync threshold field / combo bar visibility after pair level is restored
+        updateThresholdVisibility();
+    }
+
     private String nativeErrorMessage() {
         return getString("error.nativeNotLoaded", "");
     }
 
-    // 创建搜索面板（第一个功能）
+    /** Threshold field and combo progress bar are shown only for pair level 3/4 */
+    private void updateThresholdVisibility() {
+        boolean singleVisible = getSelectedPairLevel(pairLevelComboBox) >= 3;
+        if (searchMinGroupAreaLabel != null) searchMinGroupAreaLabel.setVisible(singleVisible);
+        if (searchMinGroupAreaField != null) searchMinGroupAreaField.setVisible(singleVisible);
+        if (searchComboProgressBar != null) searchComboProgressBar.setVisible(false);
+        boolean batchVisible = getSelectedPairLevel(batchPairLevelComboBox) >= 3;
+        if (batchMinGroupAreaLabel != null) batchMinGroupAreaLabel.setVisible(batchVisible);
+        if (batchMinGroupAreaField != null) batchMinGroupAreaField.setVisible(batchVisible);
+        if (batchComboProgressBar != null) batchComboProgressBar.setVisible(false);
+    }
+
+    /**
+     * Parses the min area threshold; only applies to pair level 3/4 (2-pair returns the default).
+     * Valid range [6728, 13455]; invalid or out-of-range returns -1 so the caller can block the search.
+     */
+    private int readMinGroupArea(JComboBox<String> levelCombo, JTextField field) {
+        if (getSelectedPairLevel(levelCombo) < 3) {
+            return DEFAULT_MIN_GROUP_AREA;
+        }
+        try {
+            int v = Integer.parseInt(field.getText().trim());
+            if (v >= MIN_GROUP_AREA_MIN && v <= MIN_GROUP_AREA_MAX) {
+                return v;
+            }
+        } catch (NumberFormatException ignored) {
+        }
+        return -1;
+    }
+
+    /** Combo progress bar is hidden entirely when no candidate groups exist (total <= 0) */
+    private void updateComboProgress(JProgressBar bar, long done, long total) {
+        if (total > 0) {
+            bar.setVisible(true);
+            long safeDone = Math.max(0, Math.min(done, total));
+            int pct = (int) Math.min(100, safeDone * 100 / total);
+            bar.setValue(pct);
+            bar.setString(getString("comboProgress.format", safeDone, total));
+        } else {
+            bar.setVisible(false);
+        }
+    }
+
     private JPanel createSearchPanel() {
         JPanel mainPanel = new JPanel(new BorderLayout());
         mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        // 左侧：输入和进度
+        // Left: input and progress
         JPanel leftPanel = new JPanel(new BorderLayout());
         
-        // 输入区域
         JPanel inputPanel = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
         gbc.anchor = GridBagConstraints.WEST;
 
-        // Seed 输入
         gbc.gridx = 0;
         gbc.gridy = 0;
         searchSeedLabel = new JLabel(getString("label.seed"));
@@ -216,7 +387,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         });
         inputPanel.add(searchSeedField, gbc);
 
-        // Thread Count 输入
         gbc.gridx = 0;
         gbc.gridy = 1;
         gbc.fill = GridBagConstraints.NONE;
@@ -235,7 +405,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         });
         inputPanel.add(searchThreadCountField, gbc);
 
-        // 版本选择下拉框
         gbc.gridx = 0;
         gbc.gridy = 2;
         gbc.fill = GridBagConstraints.NONE;
@@ -248,10 +417,10 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.weightx = 1.0;
         String[] versionOptions = MonumentFinderBridge.SUPPORTED_VERSION_LABELS;
         versionComboBox = new JComboBox<>(versionOptions);
-        versionComboBox.setSelectedIndex(0); // 默认选择 26.2
+        versionComboBox.setSelectedIndex(0); // index 0 = MC 26.2
         inputPanel.add(versionComboBox, gbc);
 
-        // 连级选择（筛选目标：2/3/4 连）
+        // Pair level selector: search target 2/3/4 groups
         gbc.gridx = 0;
         gbc.gridy = 3;
         gbc.fill = GridBagConstraints.NONE;
@@ -265,10 +434,24 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         pairLevelComboBox = new JComboBox<>();
         fillPairLevelComboItems(pairLevelComboBox);
         inputPanel.add(pairLevelComboBox, gbc);
+        pairLevelComboBox.addActionListener(e -> updateThresholdVisibility());
 
-        // MinX 输入
+        // Min area threshold (visible only for pair level 3/4)
         gbc.gridx = 0;
         gbc.gridy = 4;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
+        searchMinGroupAreaLabel = new JLabel(getString("label.minGroupArea"));
+        searchMinGroupAreaLabel.setFont(getLoadedFont());
+        inputPanel.add(searchMinGroupAreaLabel, gbc);
+        gbc.gridx = 1;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+        searchMinGroupAreaField = new JTextField(String.valueOf(DEFAULT_MIN_GROUP_AREA), 20);
+        inputPanel.add(searchMinGroupAreaField, gbc);
+
+        gbc.gridx = 0;
+        gbc.gridy = 5;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
         searchMinXLabel = new JLabel(getString("label.minX"));
@@ -285,9 +468,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         });
         inputPanel.add(minXField, gbc);
 
-        // MaxX 输入
         gbc.gridx = 0;
-        gbc.gridy = 5;
+        gbc.gridy = 6;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
         searchMaxXLabel = new JLabel(getString("label.maxX"));
@@ -304,9 +486,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         });
         inputPanel.add(maxXField, gbc);
 
-        // MinZ 输入
         gbc.gridx = 0;
-        gbc.gridy = 6;
+        gbc.gridy = 7;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
         searchMinZLabel = new JLabel(getString("label.minZ"));
@@ -323,9 +504,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         });
         inputPanel.add(minZField, gbc);
 
-        // MaxZ 输入
         gbc.gridx = 0;
-        gbc.gridy = 7;
+        gbc.gridy = 8;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
         searchMaxZLabel = new JLabel(getString("label.maxZ"));
@@ -342,9 +522,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         });
         inputPanel.add(maxZField, gbc);
 
-        // 语言选择
         gbc.gridx = 0;
-        gbc.gridy = 8;
+        gbc.gridy = 9;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
         gbc.gridwidth = 1;
@@ -364,9 +543,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         languageComboBox.addActionListener(e -> changeLanguage());
         inputPanel.add(languageComboBox, gbc);
 
-        // 找到二联时立即暂停选项
         gbc.gridx = 0;
-        gbc.gridy = 9;
+        gbc.gridy = 10;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
         gbc.gridwidth = 2;
@@ -375,9 +553,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         pauseOnPairFoundCheckBox.setSelected(false);
         inputPanel.add(pauseOnPairFoundCheckBox, gbc);
 
-        // 群系检查选项
         gbc.gridx = 0;
-        gbc.gridy = 10;
+        gbc.gridy = 11;
         gbc.gridwidth = 2;
         biomeCheckCheckBox = new JCheckBox(getString("check.biomeCheck"));
         biomeCheckCheckBox.setFont(getLoadedFont());
@@ -385,7 +562,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         inputPanel.add(biomeCheckCheckBox, gbc);
         gbc.gridwidth = 1;
 
-        // 按钮区域
         JPanel buttonPanel = new JPanel(new FlowLayout());
         searchStartButton = new JButton(getString("button.startSearch"));
         searchPauseButton = new JButton(getString("button.pause"));
@@ -398,19 +574,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         buttonPanel.add(searchStopButton);
         buttonPanel.add(searchResetButton);
 
-        // 静态文字展示区域（放在按钮上方）
         JPanel creditPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
         creditPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         searchCreditLabel = new JLabel(getString("credit.text"));
         searchCreditLabel.setFont(getLoadedFont());
         creditPanel.add(searchCreditLabel);
 
-        // 将 credit 和按钮放在一个容器中，credit 在上，按钮在下
         JPanel creditButtonPanel = new JPanel(new BorderLayout());
         creditButtonPanel.add(creditPanel, BorderLayout.NORTH);
         creditButtonPanel.add(buttonPanel, BorderLayout.SOUTH);
 
-        // 进度区域
         JPanel progressPanel = new JPanel(new GridBagLayout());
         GridBagConstraints pgc = new GridBagConstraints();
         pgc.insets = new Insets(5, 5, 5, 5);
@@ -426,6 +599,13 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         searchProgressBar.setString(getString("progress.initial"));
         progressPanel.add(searchProgressBar, pgc);
 
+        pgc.gridwidth = 2;
+        pgc.gridy = 4;
+        searchComboProgressBar = new JProgressBar(0, 100);
+        searchComboProgressBar.setStringPainted(true);
+        searchComboProgressBar.setVisible(false);
+        progressPanel.add(searchComboProgressBar, pgc);
+
         pgc.gridwidth = 1;
         pgc.gridy = 1;
         searchElapsedTimeLabel = new JLabel(getString("elapsedTime.initial"));
@@ -438,7 +618,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         leftPanel.add(inputPanel, BorderLayout.NORTH);
         leftPanel.add(creditButtonPanel, BorderLayout.CENTER);
         
-        // 将进度区域放在另一个容器中
         JPanel leftBottomPanel = new JPanel(new BorderLayout());
         leftBottomPanel.add(progressPanel, BorderLayout.CENTER);
         
@@ -446,7 +625,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         leftContainer.add(leftPanel, BorderLayout.CENTER);
         leftContainer.add(leftBottomPanel, BorderLayout.SOUTH);
 
-        // 右侧：结果显示
+        // Right: results display
         searchRightPanel = new JPanel(new BorderLayout());
         searchRightPanel.setBorder(BorderFactory.createTitledBorder(getString("result.border")));
         searchResultArea = new JTextArea();
@@ -464,36 +643,31 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         searchRightPanel.add(scrollPane, BorderLayout.CENTER);
         searchRightPanel.add(exportSortPanel, BorderLayout.SOUTH);
 
-        // 使用 JSplitPane 分割
         JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftContainer, searchRightPanel);
         splitPane.setDividerLocation(450);
         splitPane.setResizeWeight(0.5);
 
         mainPanel.add(splitPane, BorderLayout.CENTER);
 
-        // 添加事件监听
         searchStartButton.addActionListener(e -> startSearch());
         searchPauseButton.addActionListener(e -> toggleSearchPause());
         searchStopButton.addActionListener(e -> stopSearch());
         searchResetButton.addActionListener(e -> resetSearchToDefaults());
 
-        // 添加输入字段监听，检测参数变化
         addSearchParameterListeners();
 
         return mainPanel;
     }
 
 
-    // 添加搜索参数监听器，检测参数变化（不包括线程数）
+    // Parameter change listeners (thread count excluded)
     private void addSearchParameterListeners() {
-        // 种子变化监听（在已有监听器基础上添加检查）
         searchSeedField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void changedUpdate(javax.swing.event.DocumentEvent e) { checkSearchParameterChange(); }
             public void removeUpdate(javax.swing.event.DocumentEvent e) { checkSearchParameterChange(); }
             public void insertUpdate(javax.swing.event.DocumentEvent e) { checkSearchParameterChange(); }
         });
         
-        // 坐标变化监听
         minXField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void changedUpdate(javax.swing.event.DocumentEvent e) { checkSearchParameterChange(); }
             public void removeUpdate(javax.swing.event.DocumentEvent e) { checkSearchParameterChange(); }
@@ -516,14 +690,14 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         });
     }
     
-    // 检查搜索参数是否变化（除了线程数）
+    // Check search params for changes (thread count excluded)
     private void checkSearchParameterChange() {
         if (isSearchRunning && !isSearchPaused) {
-            return; // 运行中且未暂停，不检查
+            return;
         }
-        
+
         if (!isSearchPaused) {
-            return; // 未暂停，不检查
+            return;
         }
         
         try {
@@ -537,10 +711,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             int minZ = Integer.parseInt(minZField.getText().trim());
             int maxZ = Integer.parseInt(maxZField.getText().trim());
             
-            // 如果参数变化且处于暂停状态，重置进度（线程数变化不触发重置）
+            // Changed params while paused reset progress (thread count never triggers reset)
             if (seed != lastSearchSeed || minX != lastSearchMinX || 
                 maxX != lastSearchMaxX || minZ != lastSearchMinZ || maxZ != lastSearchMaxZ) {
-                // 停止当前搜索
                 if (searcher != null) {
                     searcher.stop();
                 }
@@ -555,6 +728,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 searchThreadCountField.setEnabled(true);
                 versionComboBox.setEnabled(true);
                 pairLevelComboBox.setEnabled(true);
+                searchMinGroupAreaField.setEnabled(true);
                 pauseOnPairFoundCheckBox.setEnabled(true);
         if (biomeCheckCheckBox != null) {
             biomeCheckCheckBox.setEnabled(true);
@@ -572,30 +746,28 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 searchRemainingTimeLabel.setText(getString("remainingTime.reset"));
             }
         } catch (NumberFormatException e) {
-            // 忽略无效输入
+            // Ignore; validated again at search start
         }
     }
 
     
-    // 验证整数输入
     private void validateIntegerInput(JTextField field, String fieldName) {
         String text = field.getText().trim();
         if (text.isEmpty()) {
-            return; // 空值不验证，会在开始运行时验证
+            return; // Empty: checked at search start instead
         }
         try {
-            // 尝试解析为double，检查是否为整数
             double value = Double.parseDouble(text);
             if (value != Math.floor(value)) {
                 JOptionPane.showMessageDialog(this, getString("validation.integerRequired", fieldName), getString("prompt.inputError"), JOptionPane.ERROR_MESSAGE);
                 field.requestFocus();
             }
         } catch (NumberFormatException e) {
-            // 不是数字，会在开始运行时验证
+            // Non-numeric: checked at search start instead
         }
     }
 
-    //保存最近一次搜索使用的种子值
+    // Cache file for the most recently used seed
     private static java.io.File seedCacheFile() {
         return new java.io.File(System.getProperty("user.home"), ".multimonumentfinder_seed");
     }
@@ -606,8 +778,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             if (!f.isFile()) {
                 return "";
             }
-            return new String(java.nio.file.Files.readAllBytes(f.toPath()),
-                    java.nio.charset.StandardCharsets.UTF_8).trim();
+            return java.nio.file.Files.readString(f.toPath()).trim();
         } catch (Exception e) {
             return "";
         }
@@ -615,13 +786,13 @@ public class DoubleMonumentForFixedSeed extends JFrame {
 
     private static void saveSeedCache(long seed) {
         try {
-            java.nio.file.Files.write(seedCacheFile().toPath(),
-                    String.valueOf(seed).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            java.nio.file.Files.writeString(seedCacheFile().toPath(),
+                    String.valueOf(seed));
         } catch (Exception ignored) {
         }
     }
 
-    // 排序搜索结果（按神殿中心点到坐标原点(0,0)的直线距离从近到远）
+    // Sort results by monument center distance to origin (0,0), nearest first
     private void sortSearchResults() {
         String text = searchResultArea.getText().trim();
         if (text.isEmpty()) {
@@ -637,16 +808,14 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             if (line.isEmpty()) {
                 continue;
             }
-            // 格式：/tp x 50 y (dx=?, dz=?)
+            // Result line format: /tp x 50 z [type=...] area=... [(pairLevel)]
             if (line.startsWith("/tp ")) {
                 try {
-                    // 提取坐标：/tp x 50 y
                     String[] parts = line.split("\\s+");
                     if (parts.length >= 4) {
                         int x = Integer.parseInt(parts[1]);
                         int z = Integer.parseInt(parts[3]);
                         
-                        // 计算到原点(0,0)的距离
                         double distance = Math.sqrt(x * x + z * z);
                         results.add(new String[]{String.valueOf(distance), line});
                     } else {
@@ -660,14 +829,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             }
         }
         
-        // 排序：按到原点的距离从近到远
         results.sort((a, b) -> {
             double d1 = Double.parseDouble(a[0]);
             double d2 = Double.parseDouble(b[0]);
             return Double.compare(d1, d2);
         });
         
-        // 重新组合文本
         StringBuilder sb = new StringBuilder();
         for (String[] result : results) {
             sb.append(result[1]).append("\n");
@@ -679,11 +846,17 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         searchResultArea.setText(sb.toString());
     }
 
-    // 搜索相关方法
+    // Single-seed search actions
     private void startSearch() {
-        // 如果当前处于暂停状态，直接恢复（不重新开始）
+        // Validate min area threshold for pair level 3/4 (block search if invalid)
+        int minGroupArea = readMinGroupArea(pairLevelComboBox, searchMinGroupAreaField);
+        if (minGroupArea < 0) {
+            JOptionPane.showMessageDialog(this, getString("error.minGroupAreaInvalid"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // While paused: resume instead of restarting
         if (isSearchRunning && isSearchPaused) {
-            // 检查线程数是否变化
             try {
                 String threadText = searchThreadCountField.getText().trim();
                 int threadCount = Integer.parseInt(threadText);
@@ -692,7 +865,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     return;
                 }
                 
-                // 检查线程数是否超过CPU核数
                 int cpuThreads = Runtime.getRuntime().availableProcessors();
                 if (threadCount > cpuThreads) {
                     int result = JOptionPane.showConfirmDialog(
@@ -710,9 +882,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     }
                 }
                 
-                // 如果线程数变化，调整线程数（不弹框，不清除进度）
+                // Thread count changed: apply live (no dialog, no progress reset)
                 if (threadCount != lastSearchThreadCount) {
-                    // 获取其他参数
                     String selectedVersion = (String) versionComboBox.getSelectedItem();
                     int mc = MonumentFinderBridge.mcFromVersionString(
                             selectedVersion != null ? selectedVersion : "26.2");
@@ -721,7 +892,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                         searcher = new MonumentSearchRunner(mc);
                     }
                     
-                    // 调用startSearch，它会检测到暂停状态并调整线程数
+                    // searcher.startSearch detects the paused state and applies the new thread count
                     String seedText = searchSeedField.getText().trim();
                     long seed = Long.parseLong(seedText);
                     int minX = Integer.parseInt(minXField.getText().trim());
@@ -735,20 +906,17 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     searcher.startSearch(seed, threadCount, minX, maxX, minZ, maxZ,
                             this::updateSearchProgress, this::addSearchResult, pauseOnPairFound,
                             isBiomeCheckSelected(), getSelectedPairLevel(pairLevelComboBox),
+                            minGroupArea,
                             this::formatGroupResult, nativeErrorMessage());
                     
                     lastSearchThreadCount = threadCount;
-                    searchPauseButton.setText(getString("button.pause"));
-                    searchThreadCountField.setEnabled(false);
-                    return;
                 } else {
-                    // 线程数没变化，直接恢复
                     searcher.resume();
                     isSearchPaused = false;
-                    searchPauseButton.setText(getString("button.pause"));
-                    searchThreadCountField.setEnabled(false);
-                    return;
                 }
+                searchPauseButton.setText(getString("button.pause"));
+                searchThreadCountField.setEnabled(false);
+                return;
             } catch (NumberFormatException e) {
                 JOptionPane.showMessageDialog(this, getString("error.threadCountContinueError"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
@@ -756,14 +924,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         }
         
         try {
-            // 验证种子
             String seedText = searchSeedField.getText().trim();
             if (seedText.isEmpty()) {
                 JOptionPane.showMessageDialog(this, getString("error.seedRequired"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
-            // 检查种子是否为整数
             double seedDouble;
             try {
                 seedDouble = Double.parseDouble(seedText);
@@ -776,7 +942,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 return;
             }
             
-            // 检查种子是否超过MC正常种子边界（绝对值超过2^63-1）
+            // MC seeds are 64-bit; reject anything beyond 2^63-1
             long seed;
             try {
                 seed = Long.parseLong(seedText);
@@ -785,7 +951,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 return;
             }
             
-            // 验证线程数
             String threadText = searchThreadCountField.getText().trim();
             double threadDouble;
             try {
@@ -805,7 +970,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 return;
             }
             
-            // 检查线程数是否超过CPU核数
             int cpuThreads = Runtime.getRuntime().availableProcessors();
             if (threadCount > cpuThreads) {
                 int result = JOptionPane.showConfirmDialog(
@@ -823,13 +987,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 }
             }
             
-            // 验证XZ坐标
             String minXText = minXField.getText().trim();
             String maxXText = maxXField.getText().trim();
             String minZText = minZField.getText().trim();
             String maxZText = maxZField.getText().trim();
             
-            // 检查是否为整数
             double minXDouble, maxXDouble, minZDouble, maxZDouble;
             try {
                 minXDouble = Double.parseDouble(minXText);
@@ -898,7 +1060,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 return;
             }
             
-            // 检查世界边界：minX/maxX/minZ/maxZ 中任一个绝对值超过 58594 时提示
+            // World border check: warn if any |bound| exceeds 58594
             boolean outOfBounds = Math.abs(minX) > WORLD_BOUND || Math.abs(maxX) > WORLD_BOUND
                     || Math.abs(minZ) > WORLD_BOUND || Math.abs(maxZ) > WORLD_BOUND;
 
@@ -915,7 +1077,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 }
             }
 
-            // 保存当前参数
+            // Save baseline for the param-change check
             lastSearchSeed = seed;
             saveSeedCache(seed);
             lastSearchMinX = minX;
@@ -932,9 +1094,10 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             searchStopButton.setEnabled(true);
             searchResetButton.setEnabled(false);
             searchSeedField.setEnabled(false);
-            searchThreadCountField.setEnabled(false); // 运行中不能修改，暂停时可以修改
+            searchThreadCountField.setEnabled(false); // Editable while paused, so lock only while running
             versionComboBox.setEnabled(false);
             pairLevelComboBox.setEnabled(false);
+            searchMinGroupAreaField.setEnabled(false);
             pauseOnPairFoundCheckBox.setEnabled(false);
             if (biomeCheckCheckBox != null) {
                 biomeCheckCheckBox.setEnabled(false);
@@ -952,7 +1115,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             searchElapsedTimeLabel.setText(getString("elapsedTime.initial"));
             searchRemainingTimeLabel.setText(getString("remainingTime.calculating"));
 
-            // 获取选择的版本
             String selectedVersion = (String) versionComboBox.getSelectedItem();
             int mc = MonumentFinderBridge.mcFromVersionString(
                     selectedVersion != null ? selectedVersion : "26.2");
@@ -963,6 +1125,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             boolean pauseOnPairFound = pauseOnPairFoundCheckBox.isSelected();
             searcher.startSearch(seed, threadCount, minX, maxX, minZ, maxZ, this::updateSearchProgress, this::addSearchResult, pauseOnPairFound,
                             isBiomeCheckSelected(), getSelectedPairLevel(pairLevelComboBox),
+                    minGroupArea,
                             this::formatGroupResult, nativeErrorMessage());
 
         } catch (NumberFormatException e) {
@@ -976,17 +1139,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         }
         
         if (isSearchPaused) {
-            // 恢复（线程数变化会在startSearch中处理）
+            // Resume; thread count changes are handled in startSearch
             searcher.resume();
             isSearchPaused = false;
             searchPauseButton.setText(getString("button.pause"));
-            searchThreadCountField.setEnabled(false); // 恢复后不能修改线程数
+            searchThreadCountField.setEnabled(false);
         } else {
-            // 暂停
             searcher.pause();
             isSearchPaused = true;
             searchPauseButton.setText(getString("button.resume"));
-            searchThreadCountField.setEnabled(true); // 暂停时可以修改线程数
+            searchThreadCountField.setEnabled(true); // Allow editing thread count while paused
         }
     }
 
@@ -1005,6 +1167,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         searchThreadCountField.setEnabled(true);
         versionComboBox.setEnabled(true);
         pairLevelComboBox.setEnabled(true);
+        searchMinGroupAreaField.setEnabled(true);
         pauseOnPairFoundCheckBox.setEnabled(true);
         if (biomeCheckCheckBox != null) {
             biomeCheckCheckBox.setEnabled(true);
@@ -1032,10 +1195,14 @@ public class DoubleMonumentForFixedSeed extends JFrame {
 
             int progress = (int) Math.min(100, info.percentage);
             searchProgressBar.setValue(progress);
-            // 将进度信息显示在进度条中
             searchProgressBar.setString(getString("progress.format", info.processed, info.total, info.percentage));
+
+            // Combo progress bar (pair level 3/4, once candidate groups exist)
+            if (getSelectedPairLevel(pairLevelComboBox) >= 3) {
+                updateComboProgress(searchComboProgressBar, info.combosDone, info.combosTotal);
+            }
             
-            // 暂停时不更新时间
+            // Keep timers frozen while paused
             if (!isSearchPaused) {
                 searchElapsedTimeLabel.setText(getString("elapsedTime", formatTime(info.elapsedMs)));
                 if (info.remainingMs > 0) {
@@ -1059,6 +1226,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 searchThreadCountField.setEnabled(true);
                 versionComboBox.setEnabled(true);
                 pairLevelComboBox.setEnabled(true);
+                searchMinGroupAreaField.setEnabled(true);
                 pauseOnPairFoundCheckBox.setEnabled(true);
         if (biomeCheckCheckBox != null) {
             biomeCheckCheckBox.setEnabled(true);
@@ -1097,7 +1265,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         int result = fileChooser.showSaveDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
             File file = fileChooser.getSelectedFile();
-            try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(file), "UTF-8"))) {
+            try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8))) {
                 writer.print(searchResultArea.getText());
                 JOptionPane.showMessageDialog(this, getString("success.export"), getString("prompt.success"), JOptionPane.INFORMATION_MESSAGE);
             } catch (IOException e) {
@@ -1116,13 +1284,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         return getString("time.format", days, hours, minutes, seconds);
     }
 
-    /**
-     * 设置窗口图标
-     * 图标文件应放在 src/main/resources/icon.png 或 icon.ico
-     */
+    /** Sets the window icon from /icon.png (or /icon.ico) in resources. */
     private void setWindowIcon() {
         try {
-            // 尝试从资源文件加载图标
             java.net.URL iconURL = getClass().getResource("/icon.png");
             if (iconURL == null) {
                 iconURL = getClass().getResource("/icon.ico");
@@ -1131,8 +1295,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 ImageIcon icon = new ImageIcon(iconURL);
                 setIconImage(icon.getImage());
             } else {
-                // 如果没有找到图标文件，可以创建一个简单的默认图标
-                // 或者使用系统默认图标（不设置）
+                // Fall back to the system default icon
                 System.out.println("提示: 未找到图标文件 (icon.png 或 icon.ico)，使用系统默认图标");
             }
         } catch (Exception e) {
@@ -1140,31 +1303,23 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         }
     }
     
-    /**
-     * 设置字体
-     * 从资源文件加载 font.ttf 字体
-     */
+    /** Loads font.ttf from resources and applies it to all UI components. */
     private void setChineseFont() {
         try {
-            // 从资源文件加载 font.ttf
             java.io.InputStream fontStream = getClass().getResourceAsStream("/font.ttf");
             if (fontStream == null) {
                 System.err.println("错误: 未找到字体文件 font.ttf，请确保文件位于 src/main/resources/font.ttf");
                 return;
             }
             
-            // 创建字体
             Font font = Font.createFont(Font.TRUETYPE_FONT, fontStream);
             fontStream.close();
             
-            // 注册字体到系统
             GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
             ge.registerFont(font);
             
-            // 创建指定大小的字体并保存
             loadedFont = font.deriveFont(Font.PLAIN, 12f);
             
-            // 设置全局字体
             UIManager.put("Label.font", loadedFont);
             UIManager.put("Button.font", loadedFont);
             UIManager.put("TextField.font", loadedFont);
@@ -1188,13 +1343,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             System.err.println("读取字体文件时出错: " + e.getMessage());
         } catch (Exception e) {
             System.err.println("加载字体时出错: " + e.getMessage());
-            e.printStackTrace();
+            LOGGER.log(Level.SEVERE, "加载字体时出错", e);
         }
     }
     
-    /**
-     * 获取加载的字体，如果未加载则返回默认字体
-     */
+    /** Returns the loaded font, or the default sans-serif if none was loaded. */
     private Font getLoadedFont() {
         if (loadedFont != null) {
             return loadedFont;
@@ -1203,21 +1356,18 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     }
     
 
-    // 创建批量搜索面板（第二个tab）
     private JPanel createBatchSearchPanel() {
         JPanel mainPanel = new JPanel(new BorderLayout());
         mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        // 左侧：输入和进度
+        // Left: input and progress
         JPanel leftPanel = new JPanel(new BorderLayout());
         
-        // 输入区域
         JPanel inputPanel = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
         gbc.anchor = GridBagConstraints.WEST;
 
-        // 种子文件导入
         gbc.gridx = 0;
         gbc.gridy = 0;
         gbc.fill = GridBagConstraints.NONE;
@@ -1243,7 +1393,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         inputPanel.add(batchSeedFileLabel, gbc);
         gbc.gridwidth = 1;
 
-        // Thread Count 输入
         gbc.gridx = 0;
         gbc.gridy = 2;
         gbc.fill = GridBagConstraints.NONE;
@@ -1262,7 +1411,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         });
         inputPanel.add(batchThreadCountField, gbc);
 
-        // 版本选择下拉框
         gbc.gridx = 0;
         gbc.gridy = 3;
         gbc.fill = GridBagConstraints.NONE;
@@ -1277,7 +1425,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         batchVersionComboBox.setSelectedIndex(0);
         inputPanel.add(batchVersionComboBox, gbc);
 
-        // 连级选择（筛选目标：2/3/4 连）
+        // Pair level selector: search target 2/3/4 groups
         gbc.gridx = 0;
         gbc.gridy = 4;
         gbc.fill = GridBagConstraints.NONE;
@@ -1291,10 +1439,24 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         batchPairLevelComboBox = new JComboBox<>();
         fillPairLevelComboItems(batchPairLevelComboBox);
         inputPanel.add(batchPairLevelComboBox, gbc);
+        batchPairLevelComboBox.addActionListener(e -> updateThresholdVisibility());
 
-        // 群系检查选项
+        // Min area threshold (visible only for pair level 3/4)
         gbc.gridx = 0;
-        gbc.gridy = 9;
+        gbc.gridy = 5;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
+        batchMinGroupAreaLabel = new JLabel(getString("label.minGroupArea"));
+        batchMinGroupAreaLabel.setFont(getLoadedFont());
+        inputPanel.add(batchMinGroupAreaLabel, gbc);
+        gbc.gridx = 1;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+        batchMinGroupAreaField = new JTextField(String.valueOf(DEFAULT_MIN_GROUP_AREA), 20);
+        inputPanel.add(batchMinGroupAreaField, gbc);
+
+        gbc.gridx = 0;
+        gbc.gridy = 10;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
         gbc.gridwidth = 2;
@@ -1304,9 +1466,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         inputPanel.add(batchBiomeCheckCheckBox, gbc);
         gbc.gridwidth = 1;
 
-        // MinX 输入
         gbc.gridx = 0;
-        gbc.gridy = 5;
+        gbc.gridy = 6;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
         batchMinXLabel = new JLabel(getString("label.minX"));
@@ -1323,9 +1484,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         });
         inputPanel.add(batchMinXField, gbc);
 
-        // MaxX 输入
         gbc.gridx = 0;
-        gbc.gridy = 6;
+        gbc.gridy = 7;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
         batchMaxXLabel = new JLabel(getString("label.maxX"));
@@ -1342,9 +1502,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         });
         inputPanel.add(batchMaxXField, gbc);
 
-        // MinZ 输入
         gbc.gridx = 0;
-        gbc.gridy = 7;
+        gbc.gridy = 8;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
         batchMinZLabel = new JLabel(getString("label.minZ"));
@@ -1361,9 +1520,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         });
         inputPanel.add(batchMinZField, gbc);
 
-        // MaxZ 输入
         gbc.gridx = 0;
-        gbc.gridy = 8;
+        gbc.gridy = 9;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
         batchMaxZLabel = new JLabel(getString("label.maxZ"));
@@ -1380,7 +1538,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         });
         inputPanel.add(batchMaxZField, gbc);
 
-        // 按钮区域
         JPanel buttonPanel = new JPanel(new FlowLayout());
         batchStartButton = new JButton(getString("button.startSearch"));
         batchPauseButton = new JButton(getString("button.pause"));
@@ -1393,19 +1550,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         buttonPanel.add(batchStopButton);
         buttonPanel.add(batchResetButton);
 
-        // 静态文字展示区域（放在按钮上方）
         JPanel creditPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
         creditPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         batchCreditLabel = new JLabel(getString("credit.text"));
         batchCreditLabel.setFont(getLoadedFont());
         creditPanel.add(batchCreditLabel);
 
-        // 将 credit 和按钮放在一个容器中，credit 在上，按钮在下
         JPanel creditButtonPanel = new JPanel(new BorderLayout());
         creditButtonPanel.add(creditPanel, BorderLayout.NORTH);
         creditButtonPanel.add(buttonPanel, BorderLayout.SOUTH);
 
-        // 进度区域
         JPanel progressPanel = new JPanel(new GridBagLayout());
         GridBagConstraints pgc = new GridBagConstraints();
         pgc.insets = new Insets(5, 5, 5, 5);
@@ -1421,6 +1575,13 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         batchProgressBar.setString(getString("progress.initial"));
         progressPanel.add(batchProgressBar, pgc);
 
+        pgc.gridwidth = 2;
+        pgc.gridy = 4;
+        batchComboProgressBar = new JProgressBar(0, 100);
+        batchComboProgressBar.setStringPainted(true);
+        batchComboProgressBar.setVisible(false);
+        progressPanel.add(batchComboProgressBar, pgc);
+
         pgc.gridwidth = 1;
         pgc.gridy = 1;
         batchElapsedTimeLabel = new JLabel(getString("elapsedTime.initial"));
@@ -1433,7 +1594,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         leftPanel.add(inputPanel, BorderLayout.NORTH);
         leftPanel.add(creditButtonPanel, BorderLayout.CENTER);
         
-        // 将进度区域放在另一个容器中
         JPanel leftBottomPanel = new JPanel(new BorderLayout());
         leftBottomPanel.add(progressPanel, BorderLayout.CENTER);
         
@@ -1441,7 +1601,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         leftContainer.add(leftPanel, BorderLayout.CENTER);
         leftContainer.add(leftBottomPanel, BorderLayout.SOUTH);
 
-        // 右侧：结果显示
+        // Right: results display
         batchRightPanel = new JPanel(new BorderLayout());
         batchRightPanel.setBorder(BorderFactory.createTitledBorder(getString("result.border")));
         batchResultArea = new JTextArea();
@@ -1462,14 +1622,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         batchRightPanel.add(scrollPane, BorderLayout.CENTER);
         batchRightPanel.add(exportSortPanel, BorderLayout.SOUTH);
 
-        // 使用 JSplitPane 分割
         JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftContainer, batchRightPanel);
         splitPane.setDividerLocation(450);
         splitPane.setResizeWeight(0.5);
 
         mainPanel.add(splitPane, BorderLayout.CENTER);
 
-        // 添加事件监听
         batchStartButton.addActionListener(e -> startBatchSearch());
         batchPauseButton.addActionListener(e -> toggleBatchSearchPause());
         batchStopButton.addActionListener(e -> stopBatchSearch());
@@ -1478,7 +1636,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         return mainPanel;
     }
 
-    // 导入种子文件
     private void importSeedFile() {
         JFileChooser fileChooser = new JFileChooser();
         fileChooser.setDialogTitle(getString("dialog.selectSeedFile"));
@@ -1515,7 +1672,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         }
     }
 
-    // 开始批量搜索
     private void startBatchSearch() {
         if (batchSeedList.isEmpty()) {
             JOptionPane.showMessageDialog(this, getString("error.seedFileRequired"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
@@ -1523,7 +1679,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         }
         
         try {
-            // 验证线程数
             String threadText = batchThreadCountField.getText().trim();
             double threadDouble;
             try {
@@ -1543,7 +1698,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 return;
             }
             
-            // 检查线程数是否超过CPU核数
             int cpuThreads = Runtime.getRuntime().availableProcessors();
             if (threadCount > cpuThreads) {
                 int result = JOptionPane.showConfirmDialog(
@@ -1561,13 +1715,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 }
             }
             
-            // 验证XZ坐标
             String minXText = batchMinXField.getText().trim();
             String maxXText = batchMaxXField.getText().trim();
             String minZText = batchMinZField.getText().trim();
             String maxZText = batchMaxZField.getText().trim();
             
-            // 检查是否为整数
             double minXDouble, maxXDouble, minZDouble, maxZDouble;
             try {
                 minXDouble = Double.parseDouble(minXText);
@@ -1636,12 +1788,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 return;
             }
             
-            // 获取选择的版本
             String selectedVersion = (String) batchVersionComboBox.getSelectedItem();
             int mc = MonumentFinderBridge.mcFromVersionString(
                     selectedVersion != null ? selectedVersion : "26.2");
 
-            // 创建final副本用于lambda表达式
+            // Final copies for lambda capture
             final int finalThreadCount = threadCount;
             final int finalMinX = minX;
             final int finalMaxX = maxX;
@@ -1649,7 +1800,14 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             final int finalMaxZ = maxZ;
             final int finalPairLevel = getSelectedPairLevel(batchPairLevelComboBox);
 
-            // 开始批量搜索
+            // Validate min area threshold for pair level 3/4 (block search if invalid)
+            int batchMinGroupArea = readMinGroupArea(batchPairLevelComboBox, batchMinGroupAreaField);
+            if (batchMinGroupArea < 0) {
+                JOptionPane.showMessageDialog(this, getString("error.minGroupAreaInvalid"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            final int finalMinGroupArea = batchMinGroupArea;
+
             isBatchSearchRunning = true;
             isBatchSearchPaused = false;
             batchStartButton.setEnabled(false);
@@ -1661,6 +1819,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             batchThreadCountField.setEnabled(false);
             batchVersionComboBox.setEnabled(false);
             batchPairLevelComboBox.setEnabled(false);
+            batchMinGroupAreaField.setEnabled(false);
             batchMinXField.setEnabled(false);
             batchMaxXField.setEnabled(false);
             batchMinZField.setEnabled(false);
@@ -1674,7 +1833,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             batchElapsedTimeLabel.setText(getString("elapsedTime.initial"));
             batchRemainingTimeLabel.setText(getString("remainingTime.calculating"));
             
-            // 在新线程中执行批量搜索
             new Thread(() -> {
                 long startTime = System.currentTimeMillis();
                 int processed = 0;
@@ -1685,7 +1843,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                         break;
                     }
                     
-                    // 为每个种子创建搜索器
                     MonumentSearchRunner batchSearcher = new MonumentSearchRunner(mc);
                     synchronized (this) {
                         currentBatchSearcher = batchSearcher;
@@ -1694,7 +1851,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     formatContextSeed = currentSeed;
                     formatContextMc = mc;
                     
-                    // 在独立线程中阻塞执行搜索，主循环 join 等待（避免 isRunning 竞态导致立即跳过）
+                    // Run each seed in its own thread, joined by this loop (avoids the isRunning race skipping seeds)
                     final MonumentSearchRunner searcherForSeed = batchSearcher;
                     Thread seedSearchThread = new Thread(
                             () -> searcherForSeed.runSearchBlocking(
@@ -1709,6 +1866,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                                     false,
                                     isBiomeCheckSelected(),
                                     finalPairLevel,
+                                    finalMinGroupArea,
                                     this::formatGroupResult,
                                     nativeErrorMessage()),
                             "batch-monument-seed-" + seed);
@@ -1725,13 +1883,15 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                             batchSearcher.resume();
                         }
 
-                        while (isBatchSearchPaused && isBatchSearchRunning && seedSearchThread.isAlive()) {
-                            try {
-                                Thread.sleep(100);
-                            } catch (InterruptedException e) {
-                                Thread.currentThread().interrupt();
-                                batchSearcher.stop();
-                                return;
+                        synchronized (batchPauseMonitor) {
+                            while (isBatchSearchPaused && isBatchSearchRunning && seedSearchThread.isAlive()) {
+                                try {
+                                    batchPauseMonitor.wait(100);
+                                } catch (InterruptedException e) {
+                                    Thread.currentThread().interrupt();
+                                    batchSearcher.stop();
+                                    return;
+                                }
                             }
                         }
 
@@ -1747,6 +1907,15 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                             batchSearcher.stop();
                             return;
                         }
+
+                        // Per-seed combo progress (pair level 3/4, once candidate groups exist)
+                        final MonumentSearchRunner comboSearcher = batchSearcher;
+                        SwingUtilities.invokeLater(() -> {
+                            if (getSelectedPairLevel(batchPairLevelComboBox) >= 3) {
+                                updateComboProgress(batchComboProgressBar,
+                                        comboSearcher.getCombosDone(), comboSearcher.getCombosTotal());
+                            }
+                        });
                     }
                     
                     synchronized (this) {
@@ -1755,53 +1924,21 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                         }
                     }
                     
-                    // 获取所有结果并解析
                     List<String> allResults = batchSearcher.getResults();
                     List<ResultItem> resultItems = new ArrayList<>();
                     
                     for (String resultStr : allResults) {
-                        // 解析结果字符串
-                        // 格式: /tp x 50 z [type=...] 面积=... (dx=?, dz=?) 或 (连级)
+                        // Result format: /tp x 50 z [type=...] area=... or area=... (pairLevel)
                         String[] parts = resultStr.split("\\s+");
                         if (parts.length >= 4 && parts[0].equals("/tp")) {
                             try {
                                 int centerX = Integer.parseInt(parts[1]);
                                 int centerZ = Integer.parseInt(parts[3]);
-                                // 提取dx和dz（二连）
-                                int dx = 0, dz = 0;
-                                int area = 0;
+                                int area = getArea(parts);
 
-                                // 查找dx、dz和面积
-                                for (int i = 0; i < parts.length; i++) {
-                                    String token = parts[i];
-                                    if (token.startsWith("dx=")) {
-                                        String dxStr = token.substring(3);
-                                        if (dxStr.endsWith(",")) {
-                                            dxStr = dxStr.substring(0, dxStr.length() - 1);
-                                        }
-                                        dx = Integer.parseInt(dxStr);
-                                    }
-                                    if (token.startsWith("dz=")) {
-                                        String dzStr = token.substring(3);
-                                        if (dzStr.endsWith(")")) {
-                                            dzStr = dzStr.substring(0, dzStr.length() - 1);
-                                        }
-                                        dz = Integer.parseInt(dzStr);
-                                    }
-                                    int eq = token.indexOf('=');
-                                    if (eq > 0 && !token.startsWith("type=") && !token.startsWith("dx=") && !token.startsWith("dz=")) {
-                                        try {
-                                            area = Integer.parseInt(token.substring(eq + 1));
-                                        } catch (NumberFormatException ignored) {
-                                        }
-                                    }
-                                }
-
-                                // 连级：带dx/dz的括号为二连，否则匹配尾部 (N)
+                                // Pair level: 2-pair has no suffix; 3/4 end with (3)/(4)
                                 int count;
-                                if (resultStr.contains("dx=")) {
-                                    count = 2;
-                                } else if (resultStr.contains("(4)")) {
+                                if (resultStr.contains("(4)")) {
                                     count = 4;
                                 } else if (resultStr.contains("(3)")) {
                                     count = 3;
@@ -1809,30 +1946,28 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                                     count = 2;
                                 }
 
-                                resultItems.add(new ResultItem(centerX, centerZ, dx, dz, count, area));
+                                resultItems.add(new ResultItem(centerX, centerZ, count, area));
                             } catch (NumberFormatException e) {
-                                // 忽略解析错误
+                                // Skip unparseable lines
                             }
                         }
                     }
                     
-                    // 只有当有结果时才输出
                     if (!resultItems.isEmpty()) {
-                        // 按距离原点由近及远排序（x²+z²）
+                        // Sort by squared distance to origin (x²+z²), nearest first
                         resultItems.sort((a, b) -> {
                             int distA = a.centerX * a.centerX + a.centerZ * a.centerZ;
                             int distB = b.centerX * b.centerX + b.centerZ * b.centerZ;
                             return Integer.compare(distA, distB);
                         });
                         
-                        // 输出结果
                         final List<ResultItem> finalResults = resultItems;
                         SwingUtilities.invokeLater(() -> {
                             formatContextSeed = currentSeed;
                             formatContextMc = mc;
-                            batchResultArea.append(String.valueOf(currentSeed) + "\n");
+                            batchResultArea.append(currentSeed + "\n");
                             for (ResultItem item : finalResults) {
-                                String resultLine = formatGroupResult(item.centerX, item.centerZ, item.count, item.area, item.dx, item.dz);
+                                String resultLine = formatGroupResult(item.centerX, item.centerZ, item.count, item.area, 0, 0);
                                 batchResultArea.append(resultLine + "\n");
                             }
                         });
@@ -1870,6 +2005,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     batchThreadCountField.setEnabled(true);
                     batchVersionComboBox.setEnabled(true);
                     batchPairLevelComboBox.setEnabled(true);
+                    batchMinGroupAreaField.setEnabled(true);
                     batchMinXField.setEnabled(true);
                     batchMaxXField.setEnabled(true);
                     batchMinZField.setEnabled(true);
@@ -1895,6 +2031,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             batchThreadCountField.setEnabled(true);
             batchVersionComboBox.setEnabled(true);
             batchPairLevelComboBox.setEnabled(true);
+            batchMinGroupAreaField.setEnabled(true);
             batchMinXField.setEnabled(true);
             batchMaxXField.setEnabled(true);
             batchMinZField.setEnabled(true);
@@ -1905,15 +2042,31 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         }
     }
 
-    // 切换批量搜索暂停状态
+    private static int getArea(String[] parts) {
+        int area = 0;
+
+        for (String token : parts) {
+            int eq = token.indexOf('=');
+            if (eq > 0 && !token.startsWith("type=")) {
+                try {
+                    area = Integer.parseInt(token.substring(eq + 1));
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+        return area;
+    }
+
     private void toggleBatchSearchPause() {
         if (!isBatchSearchRunning) {
             return;
         }
         
         if (isBatchSearchPaused) {
-            // 恢复
             isBatchSearchPaused = false;
+            synchronized (batchPauseMonitor) {
+                batchPauseMonitor.notifyAll();
+            }
             batchPauseButton.setText(getString("button.pause"));
             batchThreadCountField.setEnabled(false);
             synchronized (this) {
@@ -1922,7 +2075,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 }
             }
         } else {
-            // 暂停
             isBatchSearchPaused = true;
             batchPauseButton.setText(getString("button.resume"));
             batchThreadCountField.setEnabled(true);
@@ -1935,10 +2087,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         }
     }
 
-    // 停止批量搜索
     private void stopBatchSearch() {
         isBatchSearchRunning = false;
         isBatchSearchPaused = false;
+        synchronized (batchPauseMonitor) {
+            batchPauseMonitor.notifyAll();
+        }
         synchronized (this) {
             if (currentBatchSearcher != null) {
                 currentBatchSearcher.stop();
@@ -1963,7 +2117,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         batchRemainingTimeLabel.setText(getString("remainingTime.stopped"));
     }
 
-    // 重置批量搜索区域
     private void resetBatchSearchToDefaults() {
         batchMinXField.setText(String.valueOf(BATCH_DEFAULT_MIN_X));
         batchMaxXField.setText(String.valueOf(BATCH_DEFAULT_MAX_X));
@@ -1971,7 +2124,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         batchMaxZField.setText(String.valueOf(BATCH_DEFAULT_MAX_Z));
     }
 
-    // 导出批量搜索结果
     private void exportBatchResults(boolean fullFormat) {
         String text = batchResultArea.getText().trim();
         if (text.isEmpty()) {
@@ -1987,18 +2139,17 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         int result = fileChooser.showSaveDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
             File file = fileChooser.getSelectedFile();
-            try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(file), "UTF-8"))) {
+            try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8))) {
                 if (fullFormat) {
                     writer.print(text);
                 } else {
-                    // 只导出种子列表
+                    // Seeds-only export: emit seed lines, skip /tp result lines
                     String[] lines = text.split("\n");
                     for (String line : lines) {
                         line = line.trim();
                         if (line.isEmpty()) {
                             continue;
                         }
-                        // 如果是种子行（不包含/tp），则输出
                         if (!line.startsWith("/tp")) {
                             writer.println(line);
                         }
@@ -2011,14 +2162,13 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         }
     }
 
-    // 排序批量搜索结果
     private void sortBatchResults() {
         String text = batchResultArea.getText().trim();
         if (text.isEmpty()) {
             return;
         }
         
-        // 解析文本，按种子分组
+        // Parse text into per-seed groups
         String[] lines = text.split("\n");
         List<SeedResultGroup> groups = new ArrayList<>();
         SeedResultGroup currentGroup = null;
@@ -2029,12 +2179,10 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 continue;
             }
             if (line.startsWith("/tp")) {
-                // 这是结果行
                 if (currentGroup != null) {
                     currentGroup.results.add(line);
                 }
             } else {
-                // 这是种子行
                 if (currentGroup != null) {
                     groups.add(currentGroup);
                 }
@@ -2047,31 +2195,26 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             groups.add(currentGroup);
         }
         
-        // 对每个种子的结果进行排序，并计算最近距离
+        // Sort each group's results and record its nearest distance
         for (SeedResultGroup group : groups) {
             if (!group.results.isEmpty()) {
                 group.results.sort((a, b) -> {
-                    // 提取坐标
                     int distA = extractDistanceSquared(a);
                     int distB = extractDistanceSquared(b);
                     return Integer.compare(distA, distB);
                 });
-                // 计算该种子中离原点最近的距离（第一个结果就是最近的）
+                // First result after sorting is the nearest to origin
                 group.minDistance = extractDistanceSquared(group.results.get(0));
             } else {
                 group.minDistance = Integer.MAX_VALUE;
             }
         }
         
-        // 按照每个种子中离原点最近的距离对所有种子进行排序
-        groups.sort((a, b) -> {
-            return Integer.compare(a.minDistance, b.minDistance);
-        });
+        groups.sort(Comparator.comparingInt(a -> a.minDistance));
         
-        // 重新组合文本（只输出有结果的种子）
+        // Rebuild text, keeping only seeds with results
         StringBuilder sb = new StringBuilder();
         for (SeedResultGroup group : groups) {
-            // 只输出有结果的种子组
             if (!group.results.isEmpty()) {
                 sb.append(group.seed).append("\n");
                 for (String result : group.results) {
@@ -2083,7 +2226,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         batchResultArea.setText(sb.toString());
     }
     
-    // 从结果行中提取距离的平方
     private int extractDistanceSquared(String resultLine) {
         try {
             String[] parts = resultLine.split("\\s+");
@@ -2093,32 +2235,26 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 return x * x + z * z;
             }
         } catch (NumberFormatException e) {
-            // 忽略
+            // Unparseable lines sort last
         }
         return Integer.MAX_VALUE;
     }
     
-    // 种子结果组
     private static class SeedResultGroup {
         String seed;
         List<String> results;
-        int minDistance; // 该种子中离原点最近的距离
+        int minDistance; // Nearest distance to origin among this seed's results
     }
     
-    // 结果项
     private static class ResultItem {
         int centerX;
         int centerZ;
-        int dx;
-        int dz;
         int count;
         int area;
 
-        ResultItem(int centerX, int centerZ, int dx, int dz, int count, int area) {
+        ResultItem(int centerX, int centerZ, int count, int area) {
             this.centerX = centerX;
             this.centerZ = centerZ;
-            this.dx = dx;
-            this.dz = dz;
             this.count = count;
             this.area = area;
         }
@@ -2169,6 +2305,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         if (searchVersionLabel != null) searchVersionLabel.setText(getString("label.mcVersion"));
         if (searchPairLevelLabel != null) searchPairLevelLabel.setText(getString("label.pairLevel"));
         if (pairLevelComboBox != null) fillPairLevelComboItems(pairLevelComboBox);
+        if (searchMinGroupAreaLabel != null) searchMinGroupAreaLabel.setText(getString("label.minGroupArea"));
         if (searchMinXLabel != null) searchMinXLabel.setText(getString("label.minX"));
         if (searchMaxXLabel != null) searchMaxXLabel.setText(getString("label.maxX"));
         if (searchMinZLabel != null) searchMinZLabel.setText(getString("label.minZ"));
@@ -2218,6 +2355,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         if (batchVersionLabel != null) batchVersionLabel.setText(getString("label.mcVersion"));
         if (batchPairLevelLabel != null) batchPairLevelLabel.setText(getString("label.pairLevel"));
         if (batchPairLevelComboBox != null) fillPairLevelComboItems(batchPairLevelComboBox);
+        if (batchMinGroupAreaLabel != null) batchMinGroupAreaLabel.setText(getString("label.minGroupArea"));
         if (batchMinXLabel != null) batchMinXLabel.setText(getString("label.minX"));
         if (batchMaxXLabel != null) batchMaxXLabel.setText(getString("label.maxX"));
         if (batchMinZLabel != null) batchMinZLabel.setText(getString("label.minZ"));
@@ -2247,14 +2385,13 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     }
 
     public static void main(String[] args) {
-        // 注意：系统属性应该在 Launcher 中设置
-        // 这里只保留必要的初始化逻辑
-        
+        // System properties are set by the Launcher; keep only essential init here
+
         SwingUtilities.invokeLater(() -> {
             try {
                 UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
             } catch (Exception e) {
-                e.printStackTrace();
+                LOGGER.log(Level.SEVERE, "设置系统外观失败", e);
             }
             new DoubleMonumentForFixedSeed().setVisible(true);
         });

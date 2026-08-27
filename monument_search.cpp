@@ -22,9 +22,7 @@ struct PairCheckResult {
     bool isLowEfficiency = false;
 };
 
-/* 搜索上下文不保存任何全局神殿列表：配对/成组判定全部在 64x64 分块窗口内
- * 局部完成。全局哈希表在大范围搜索（数亿区域）时会膨胀到上亿条目，是
- * OOM 与进度卡顿的根源，故一律去掉 */
+// No global monument list: grouping is decided inside the chunk window only; global hash tables caused OOM/stalls on huge searches.
 struct SearchContext {
     MonumentSearchConfig cfg;
     Progress *progress = nullptr;
@@ -86,23 +84,13 @@ PairCheckResult checkCanFormPair(const MonumentPos &pos1, const MonumentPos &pos
     return {false, false};
 }
 
-/* Two monuments can only share one spawning area if their boxes both reach a
- * common 128-circle, bounding the centre distance well below this limit
- * (2 * (128 spawn radius + 58 monument size), generous on purpose). */
-constexpr int GROUP_LINK_DIST_SQ = 372 * 372;
+// Box-sharing centre distance bound: 2*128 + 58*sqrt(2) ~338; largest valid 16-aligned pair ~334 (dx=272,dz=192), so 336 is safe and tight.
+constexpr int GROUP_LINK_DIST_SQ = 336 * 336;
 constexpr int MONUMENT_BOX = 58;
 
-/* 过滤三/四连的最小可用面积：一个二连最多覆盖 2 个完整刷怪箱 */
-constexpr int MIN_GROUP_AREA = 2 * MONUMENT_BOX * MONUMENT_BOX;
+// ==================== geometry-first chunk scan ====================
 
-/* ==================== geometry-first chunk scan ==================== */
-
-/* 分块大小（区域数）。块内 + 1 圈 halo 的结构位置只靠 RNG 生成（廉价），
- * 只有几何预筛通过的候选才做群系采样/挂机面积计算。
- * 无全局去重的正确性：任何有效组的成员两两中心距 <= 372 < 512（一个区域），
- * 因此整组必然落在"组内字典序最小的搜索范围内成员"所在分块的窗口里；只在
- * 该成员为块内区域时输出一次，既不重复也不遗漏，跨搜索边界的组由 halo
- * 自然覆盖（界外成员最多 372 < 512，必在边界块的 halo 内）。 */
+// Chunk size in regions. RNG generates chunk+halo positions cheaply; expensive sampling runs only on pre-screened candidates. Dedup: group members are pairwise <= 336 < 512, so the group lies in the window of the chunk holding its lexicographically smallest in-range member; emit once there, border groups covered by halo.
 constexpr int CHUNK = 64;
 
 inline bool lexLessPos(int ax, int az, int bx, int bz)
@@ -110,7 +98,7 @@ inline bool lexLessPos(int ax, int az, int bx, int bz)
     return ax != bx ? ax < bx : az < bz;
 }
 
-/* 组邻接：中心距 <= 372（RNG 结构位置恒为 16 对齐，无需再查对齐） */
+// Group adjacency: centre distance <= 336 (RNG positions are always 16-aligned)
 inline bool groupLinked(const MonumentBlockPos &a, const MonumentBlockPos &b)
 {
     long long adx = a.x > b.x ? (long long) a.x - b.x : (long long) b.x - a.x;
@@ -120,21 +108,49 @@ inline bool groupLinked(const MonumentBlockPos &a, const MonumentBlockPos &b)
 
 void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
 {
-    /* 结果队列已满（几何-only 大范围搜索会产出天文数字的候选）时跳过
-     * 所有昂贵计算 */
+    // Skip expensive work once the result queue is full (geometry-only searches produce astronomically many candidates)
     if (ctx.out->full())
         return;
+
+    // 3/4-combo counting: +1 candidate on pre-screen; every exit path marks it processed
+    const bool counted = nn >= 3 && ctx.progress != nullptr;
+    if (counted)
+        ctx.progress->combosTotal.fetch_add(1, std::memory_order_relaxed);
+
+    // Early reject: group coverage <= sum_i min_{j!=i} U2(dist_ij); bound <= threshold means even the best AFK point falls short, skip exact computation.
+    long long bound = 0;
+    for (int i = 0; i < nn; i++) {
+        int m = INT_MAX;
+        for (int j = 0; j < nn; j++) {
+            if (j == i)
+                continue;
+            int dx = std::abs(pts[i].x - pts[j].x);
+            int dz = std::abs(pts[i].z - pts[j].z);
+            int ub = monument_pair_upper_bound(dx, dz);
+            if (ub < m)
+                m = ub;
+        }
+        bound += m;
+    }
+    if (bound <= ctx.cfg.minGroupArea) {
+        if (counted)
+            ctx.progress->combosDone.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
 
     int afkX = 0;
     int afkZ = 0;
     int groupArea = monument_afk_coverage(pts, nn, MONUMENT_BOX, MONUMENT_BOX, &afkX, &afkZ);
 
-    /* 三/四连面积过滤 */
-    if (groupArea <= MIN_GROUP_AREA)
+    // Area must strictly exceed the threshold (== best-pair area = no gain, i.e. noise)
+    if (groupArea <= ctx.cfg.minGroupArea) {
+        if (counted)
+            ctx.progress->combosDone.fetch_add(1, std::memory_order_relaxed);
         return;
+    }
 
-    /* 贡献过滤：去掉任一成员都必须使面积严格变小，否则该成员对最佳挂机点
-     * 贡献为 0，整个组实质上是更小的组（伪三/四连），不输出 */
+    // Contribution filter: removing any member must strictly shrink the area, otherwise the group is effectively smaller (pseudo 3/4-group)
+    bool keep = true;
     for (int skip = 0; skip < nn; skip++) {
         MonumentBlockPos sub[3];
         int m = 0;
@@ -143,8 +159,15 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
                 sub[m++] = pts[i];
         }
         if (monument_afk_coverage(sub, nn - 1, MONUMENT_BOX, MONUMENT_BOX, nullptr,
-                                  nullptr) >= groupArea)
-            return;
+                                  nullptr) >= groupArea) {
+            keep = false;
+            break;
+        }
+    }
+    if (!keep) {
+        if (counted)
+            ctx.progress->combosDone.fetch_add(1, std::memory_order_relaxed);
+        return;
     }
 
     PairHit hit;
@@ -162,6 +185,8 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
     hit.count = nn;
     hit.area = groupArea;
     ctx.out->addResult(hit);
+    if (counted)
+        ctx.progress->combosDone.fetch_add(1, std::memory_order_relaxed);
 }
 
 void processChunk(
@@ -180,7 +205,7 @@ void processChunk(
         int z = 0;
     };
     std::vector<RegionPos> win((size_t) W * W);
-    /* 可行性备忘：0=未采样 1=可行 2=不可行（biomeCheck=false 时恒可行） */
+    // Viability memo: 0=unsampled 1=viable 2=not (always viable without biome check)
     std::vector<uint8_t> viable((size_t) W * W, 0);
 
     auto viableAt = [&](int lx, int lz) -> bool {
@@ -210,8 +235,7 @@ void processChunk(
                regZ < ctx.cfg.maxZ;
     };
 
-    /* 块内 + halo 的结构位置（RNG only，无群系采样）；halo 允许越出搜索
-     * 边界，使跨搜索边缘的组也能被整组看到 */
+    // Structure positions for chunk + halo (RNG only); halo may cross the search border so border-straddling groups are seen whole
     for (int lx = 0; lx < W; lx++) {
         for (int lz = 0; lz < W; lz++) {
             RegionPos &dst = win[(size_t) lx * W + lz];
@@ -236,8 +260,7 @@ void processChunk(
                 continue;
 
             if (level == 2) {
-                /* ---- 对：c 为块内区域，只与"搜索范围外的邻居"或"字典序
-                 * 大于 c 的范围内邻居"配对时输出，保证全局恰好一次 ---- */
+                // pair: pair only with out-of-range or lexicographically greater in-range neighbours, so each pair is emitted exactly once
                 for (int dx = -1; dx <= 1; dx++) {
                     for (int dz = -1; dz <= 1; dz++) {
                         if (dx == 0 && dz == 0)
@@ -278,7 +301,7 @@ void processChunk(
                 continue;
             }
 
-            /* ---- 三/四连：c 必须是组内字典序最小的搜索范围内成员 ---- */
+            // 3/4: c must be the lexicographically smallest in-range member
             struct Member {
                 MonumentBlockPos pos;
                 int lx;
@@ -324,7 +347,7 @@ void processChunk(
                         emitGroup(ctx, pts, 3);
                     }
                 }
-            } else { /* level == 4 */
+            } else { // level == 4
                 for (int i = 0; i < nn; i++) {
                     for (int j = i + 1; j < nn; j++) {
                         if (!groupLinked(nbrs[i].pos, nbrs[j].pos))
@@ -364,7 +387,11 @@ void runMonumentSearch(
     ctx.centerRegX = (cfg.minX + cfg.maxX) / 2;
     ctx.centerRegZ = (cfg.minZ + cfg.maxZ) / 2;
 
-    /* 区域不物化成列表：按 64x64 分块，块间按距搜索中心排序（近似就近出结果） */
+    // Pairwise joint-coverage upper bound table (built once per process, ~100ms)
+    if (cfg.pairLevel >= 3)
+        monument_ensure_pair_upper_bounds();
+
+    // Regions are never materialized: process 64x64 chunks sorted by distance to the search centre
     const long width = std::max(0, cfg.maxX - cfg.minX);
     const long height = std::max(0, cfg.maxZ - cfg.minZ);
     const long totalTasks = width * height;
@@ -432,7 +459,8 @@ void runMonumentSearch(
 
                     if (progress) {
                         long done = completed.fetch_add(cells) + cells;
-                        progress->current = (int) std::min(done, totalTasks);
+                        // saturate at INT_MAX to avoid overflow to negative on huge ranges
+                        progress->current = (int) std::min(done, (long) INT_MAX);
                     }
                 }
                 monument_generator_free(g);

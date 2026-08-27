@@ -7,8 +7,7 @@
 extern "C" {
 #endif
 
-/** cubiomes structure position (Pos from finders.h) — redeclared to avoid
- *  pulling cubiomes headers into every consumer. */
+/** cubiomes Pos redeclared to avoid pulling cubiomes headers into every consumer. */
 typedef struct MonumentBlockPos {
     int x;
     int z;
@@ -22,7 +21,7 @@ void monument_generator_free(MonumentGenerator *g);
 
 void monument_init_generator(MonumentGenerator *g, int mc, uint64_t seed);
 
-/** @return 1 if monument exists at region and passes deep-ocean viability */
+/** Deep-ocean viable monument at region; @return 1 and outputs block position. */
 int monument_try_region(
     uint64_t seed,
     int mc,
@@ -31,7 +30,7 @@ int monument_try_region(
     int *outBlockX,
     int *outBlockZ);
 
-/** Uses an already-initialized generator (no setupGenerator per call). */
+/** Same as monument_try_region but with an already-initialized generator. */
 int monument_try_region_g(
     MonumentGenerator *g,
     int mc,
@@ -41,8 +40,7 @@ int monument_try_region_g(
     int *outBlockX,
     int *outBlockZ);
 
-/** Structure-region RNG only (no biome sampling) — cheap geometric prefilter.
- *  @return 1 if the region yields a structure position */
+/** Structure-region RNG only (no biome sampling) - cheap geometric prefilter. */
 int monument_region_pos(
     uint64_t seed,
     int mc,
@@ -51,7 +49,7 @@ int monument_region_pos(
     int *outBlockX,
     int *outBlockZ);
 
-/** @return 1 if a monument exists near block (targetX,targetZ) within tolerance */
+/** Monument near block (targetX,targetZ) within tolerance; @return 1 and outputs position. */
 int monument_exists_at_block(
     uint64_t seed,
     int mc,
@@ -82,22 +80,7 @@ int monument_classify_ocean_type_g(
     int centerX,
     int centerZ);
 
-/**
- * Usable spawning area for a group of n (1..4) monuments, evaluated with the
- * horizontal 128-block spawning circle (no height dimension), mirroring
- * cubiomes-viewer's getOptimalAfk(qs, 58, 0, 58, ...) call.
- *
- * Each monument contributes a 58x58 spawning box anchored at its position.
- * Searches whole-block AFK positions for the maximum covered box blocks,
- * seeded from pair midpoints and flood-filled (iteratively), ties resolved
- * by averaging equally good positions (same as cubiomes quadbase.c).
- *
- * @p        : monument positions
- * @n        : number of positions (1..4)
- * @ax,az    : spawning box size (58, 58 for monuments)
- * @outX,outZ: optional output of the optimal AFK block position
- * @return   : number of spawning blocks covered from the best AFK point
- */
+/** Best AFK coverage for n (1..4) monuments: 128-block spawning circle, 58x58 box each (getOptimalAfk model, ties averaged like quadbase.c); outputs the optimal AFK point if requested. @return covered spawning blocks. */
 int monument_afk_coverage(
     const MonumentBlockPos *p,
     int n,
@@ -105,6 +88,12 @@ int monument_afk_coverage(
     int az,
     int *outX,
     int *outZ);
+
+/** Build the pairwise joint-coverage upper-bound table once (call before 3/4 searches). */
+void monument_ensure_pair_upper_bounds(void);
+
+/** Exact max joint coverage of two spawning boxes at (dx,dz) block distance; dx,dz must be multiples of 16, <= 336. Safe upper bound 2*58*58 until the table is built. */
+int monument_pair_upper_bound(int dxBlocks, int dzBlocks);
 
 #ifdef __cplusplus
 }

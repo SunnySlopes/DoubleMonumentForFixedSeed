@@ -16,14 +16,14 @@ enum {
     OCEAN_TYPE_FROZEN = 2,
 };
 
-/** Minecraft climate band boundaries (temperature / continentalness). */
+// Minecraft climate band boundaries (temperature / continentalness)
 static const double TEMP_FROZEN_MAX = -0.45;
 static const double TEMP_COLD_MAX = -0.15;
 static const double CONT_OCEAN_MAX = -0.11;
 
 static int classify_ocean_point(const BiomeNoise *bn, int blockX, int blockZ)
 {
-    /* sampleBiomeNoise expects 1:4 horizontal coords (see cubiomes mapApproxHeight). */
+    // sampleBiomeNoise expects 1:4 horizontal coords (see cubiomes mapApproxHeight)
     int sampleX = blockX / 4;
     int sampleZ = blockZ / 4;
     int64_t np[NP_MAX] = {0};
@@ -210,25 +210,19 @@ int monument_classify_ocean_type(
     return monument_classify_ocean_type_g(&g, mc, centerX, centerZ);
 }
 
-/* ==================== AFK coverage (multi-monument groups) ==================== */
+// ==================== AFK coverage (multi-monument groups) ====================
 
-/* Horizontal spawning circle: the AFK position attracts (keeps alive) every
- * spawning block within euclidean distance 128 on the horizontal plane. */
+// AFK position attracts (keeps alive) every spawning block within euclidean distance 128 on the horizontal plane.
 static const double AFK_RSQ = 128.0 * 128.0;
 
-/* Monument spawning box anchor. getStructurePos returns the structure-region
- * chunk corner; the in-game monument centre sits at corner + 8 and the 58x58
- * bounding box extends 29 blocks north-west and 28 blocks south-east of it:
- * [pos + 8 - 29, pos + 8 + 28] = [pos - 21, pos + 36]. (In-game verified.)
- * Area is invariant to any rigid anchor shift, but the reported AFK point is
- * only correct with this anchor. */
-#define AFK_BOX_LO(ax) (8 - ((ax) + 1) / 2)        /* -21 for 58 */
-#define AFK_BOX_HI(ax) (AFK_BOX_LO(ax) + (ax) - 1) /* +36 for 58 */
+// getStructurePos returns the region chunk corner; in-game centre is corner+8 and the 58x58 box spans [pos-21, pos+36] (in-game verified). Area is anchor-invariant but the reported AFK point is only correct with this anchor.
+#define AFK_BOX_LO(ax) (8 - ((ax) + 1) / 2)        // -21 for 58
+#define AFK_BOX_HI(ax) (AFK_BOX_LO(ax) + (ax) - 1) // +36 for 58
 
 typedef struct {
     const MonumentBlockPos *p;
     int n;
-    int *buf; /* flood-fill memo: -1 = unvisited, else covered count */
+    int *buf; // flood-fill memo: -1 = unvisited, else covered count
     int x0, z0, w, h;
     int ax, az;
     int best;
@@ -259,16 +253,14 @@ static int afk_blocks_in_range(
     return cnt;
 }
 
-/* Iterative flood fill from one seed point (recursion could get very deep on
- * wide 4-monument groups). Neighbours are only expanded while the current
- * block ties or beats the running best, as in cubiomes quadbase.c. */
+// Iterative flood fill from a seed (recursion could get very deep on wide groups); expand neighbours only while the current block ties or beats the best, as in cubiomes quadbase.c.
 static void afk_flood(AfkMeta *d, int sx, int sz)
 {
     if (sx < 0 || sz < 0 || sx >= d->w || sz >= d->h)
         return;
 
     int cap = d->w * d->h;
-    /* a cell can be pushed once per neighbour (plus the seed), so allow 4x */
+    // a cell can be pushed once per neighbour (plus the seed), so allow 4x
     int *stack = (int *) malloc(sizeof(int) * (size_t) cap * 4 + sizeof(int) * 4);
     if (!stack)
         return;
@@ -307,22 +299,7 @@ static void afk_flood(AfkMeta *d, int sx, int sz)
     free(stack);
 }
 
-/* Exact full-window coverage scan for n >= 3 groups.
- *
- * The flood fill used for pairs only walks non-decreasing plateaus, so a
- * triangle/quad whose global optimum is separated from every midpoint or
- * centroid seed by a dip would be scored with a local maximum instead
- * (observed: 7895 reported where far more was achievable).  This path
- * evaluates every window cell exactly:
- *
- *   - window [x0, x0+w) x [z0, z0+h) provably contains the optimum: clamping
- *     an outside candidate towards the group bounding box never decreases any
- *     box-row interval intersection;
- *   - row decomposition keeps it cheap: a box block-row at z only reaches
- *     candidate rows pz with |pz - z| <= 128, and within one (box row,
- *     candidate row) pair the per-column contribution is the length of the
- *     intersection [max(bx, px-R), min(bx+ax-1, px+R)], with
- *     R = floor(sqrt(128^2 - dz^2)) precomputed per dz. */
+// Exact full-window scan for n >= 3 groups: the pair flood fill only walks non-decreasing plateaus, so a group whose optimum is separated from every seed by a dip would score a local maximum (observed: 7895 reported where far more was achievable). The window [x0,x0+w)x[z0,z0+h) provably contains the optimum (clamping outside candidates towards the bounding box never decreases coverage), and a row decomposition with precomputed R(dz) = floor(sqrt(128^2-dz^2)) keeps it cheap.
 static void afk_coverage_exact(
     const MonumentBlockPos *p,
     int n,
@@ -345,14 +322,14 @@ static void afk_coverage_exact(
     if (!cov || !stack) {
         free(cov);
         free(stack);
-        return; /* keep the caller's single-box fallback */
+        return; // keep the caller's single-box fallback
     }
     memset(cov, 0, sizeof(int) * (size_t) w * (size_t) h);
 
     for (int i = 0; i < n; i++) {
         const int bx = p[i].x + AFK_BOX_LO(ax);
         const int bx1 = p[i].x + AFK_BOX_HI(ax);
-        for (int j = 0; j < az; j++) { /* box block-rows */
+        for (int j = 0; j < az; j++) { // box block-rows
             const int rowz = p[i].z + AFK_BOX_LO(az) + j;
             int pz = rowz - RMAX > z0 ? rowz - RMAX : z0;
             const int pzHi = rowz + RMAX < z0 + h - 1 ? rowz + RMAX : z0 + h - 1;
@@ -385,8 +362,7 @@ static void afk_coverage_exact(
         return;
     }
 
-    /* average the plateau of globally optimal cells connected to bIdx
-     * (disconnected maxima must not be averaged into the same point) */
+    // average only the plateau of globally optimal cells connected to bIdx (disconnected maxima must not be merged into the same point)
     int64_t sumx = 0;
     int64_t sumz = 0;
     int sumn = 0;
@@ -437,7 +413,7 @@ int monument_afk_coverage(
     if (!p || n < 1 || n > 4 || ax <= 0 || az <= 0)
         return 0;
 
-    /* window over the box extents: [pos + 9 - ax, pos + 8] per axis */
+    // window over the box extents: [pos + 9 - ax, pos + 8] per axis
     int minX = INT_MAX, minZ = INT_MAX, maxX = INT_MIN, maxZ = INT_MIN;
     for (int i = 0; i < n; i++) {
         if (p[i].x < minX) minX = p[i].x;
@@ -462,9 +438,7 @@ int monument_afk_coverage(
         return cnt;
     }
 
-    /* n >= 3: exact full-window scan. The plateau-limited flood fill below
-     * cannot cross a dip, so for triangles/quads it can report a local
-     * maximum instead of the global optimum. */
+    // n >= 3: exact full-window scan; the plateau-limited flood fill below would miss optima separated from seeds by a dip
     if (n >= 3) {
         afk_coverage_exact(p, n, minX, minZ, w, h, ax, az, &afk, &cnt);
         if (outX) *outX = afk.x;
@@ -490,9 +464,7 @@ int monument_afk_coverage(
     d.ax = ax;
     d.az = az;
 
-    /* seed candidates for pairs: the pair midpoint. The optimum of two boxes
-     * lies on the segment between the centers, which the plateau walk from
-     * the midpoint covers completely. */
+    // seed candidates for pairs: the pair midpoint (the two-box optimum lies on the centre segment, fully covered by the plateau walk from it)
     MonumentBlockPos dsp[1];
     int ndsp = 0;
     if (n == 2) {
@@ -539,4 +511,51 @@ int monument_afk_coverage(
     if (outZ)
         *outZ = afk.z;
     return cnt;
+}
+
+// ==================== pairwise joint-coverage upper bound table ====================
+
+// Structure positions are always 16-aligned, so pairwise block distances are multiples of 16 and <= 336 (group adjacency bound, see GROUP_LINK_DIST_SQ in monument_search.cpp); discretize as idx = dist/16.
+#define PAIR_UB_STEPS 22
+#define PAIR_UB_MAX_AREA (2 * 58 * 58)
+
+static int g_pairUB[PAIR_UB_STEPS][PAIR_UB_STEPS];
+static int g_pairUBReady = 0;
+
+void monument_ensure_pair_upper_bounds(void)
+{
+    if (g_pairUBReady)
+        return;
+
+    const int box = 58;
+    for (int i = 0; i < PAIR_UB_STEPS; i++) {
+        for (int j = 0; j <= i; j++) {
+            MonumentBlockPos p[2] = {{0, 0}, {i * 16, j * 16}};
+            MonumentBlockPos best = {0, 0};
+            int bestCnt = -1;
+            // window: bounding rectangle of both box extents [pos-21, pos+36]
+            int w = i * 16 + box;
+            int h = j * 16 + box;
+            afk_coverage_exact(p, 2, AFK_BOX_LO(box), AFK_BOX_LO(box), w, h,
+                               box, box, &best, &bestCnt);
+            // exact-scan maximum is the upper bound; fall back to the theoretical max on allocation failure to preserve the bound
+            int ub = bestCnt > 0 ? bestCnt : PAIR_UB_MAX_AREA;
+            g_pairUB[i][j] = ub;
+            g_pairUB[j][i] = ub;
+        }
+    }
+    g_pairUBReady = 1;
+}
+
+int monument_pair_upper_bound(int dxBlocks, int dzBlocks)
+{
+    if (!g_pairUBReady)
+        return PAIR_UB_MAX_AREA;
+    int i = dxBlocks / 16;
+    int j = dzBlocks / 16;
+    if (i >= PAIR_UB_STEPS)
+        i = PAIR_UB_STEPS - 1;
+    if (j >= PAIR_UB_STEPS)
+        j = PAIR_UB_STEPS - 1;
+    return g_pairUB[i][j];
 }

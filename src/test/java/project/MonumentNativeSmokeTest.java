@@ -5,8 +5,7 @@ import java.util.Set;
 
 /**
  * Quick JNI smoke test (run after buildNative).
- *
- * Optional args: seed minX maxX minZ maxZ pairLevel biomeCheck
+ * Optional args: seed minX maxX minZ maxZ pairLevel biomeCheck minGroupArea
  */
 public final class MonumentNativeSmokeTest {
 
@@ -17,7 +16,9 @@ public final class MonumentNativeSmokeTest {
         int minZ = args.length > 3 ? Integer.parseInt(args[3]) : -2;
         int maxZ = args.length > 4 ? Integer.parseInt(args[4]) : 2;
         int pairLevel = args.length > 5 ? Integer.parseInt(args[5]) : 2;
-        boolean biomeCheck = args.length > 6 ? Boolean.parseBoolean(args[6]) : true;
+        boolean biomeCheck = args.length <= 6 || Boolean.parseBoolean(args[6]);
+        // 0 = built-in default (2*58*58); only effective for pairLevel >= 3
+        int minGroupArea = args.length > 7 ? Integer.parseInt(args[7]) : 0;
 
         MonumentFinderBridge.resetSearchState();
         long t0 = System.currentTimeMillis();
@@ -31,7 +32,8 @@ public final class MonumentNativeSmokeTest {
                 Runtime.getRuntime().availableProcessors(),
                 false,
                 pairLevel,
-                biomeCheck);
+                biomeCheck,
+                minGroupArea);
         long ms = System.currentTimeMillis() - t0;
         printHits(seed, raw);
         int[] progress = MonumentFinderBridge.getSearchProgress();
