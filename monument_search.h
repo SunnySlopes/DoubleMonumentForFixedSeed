@@ -5,8 +5,9 @@
 #include <cstdint>
 
 struct Progress {
-    std::atomic_int current{0};
-    std::atomic_int total{0};
+    // region scan progress; 64-bit: full-world searches exceed 2^31 regions (int would saturate at 100% and wrap on the final assignment)
+    std::atomic<long long> current{0};
+    std::atomic<long long> total{0};
     std::atomic_int status{0};
     // 3/4-combo progress: combosTotal = pre-screened candidates, combosDone = processed; 64-bit: full-world searches exceed 2^31 candidates
     std::atomic<long long> combosDone{0};

@@ -67,7 +67,7 @@ java -Djava.library.path=build/native -cp "build/classes/java/main;build/classes
 ```
 
 Optional args / 可选参数：`seed minX maxX minZ maxZ pairLevel biomeCheck minGroupArea`
-(e.g. `... project.MonumentNativeSmokeTest 123 -2 2 -2 2 3 true 6728` for a triple search with threshold 6728).
+(e.g. `... project.MonumentNativeSmokeTest 123 -2 2 -2 2 3 true 6728` for a triple search with threshold 6728; pass `0` for the built-in default).
 例如：`... 123 -2 2 -2 2 3 true 6728` 表示三连搜索、最小面积阈值 6728（阈值传 0 用内置默认 6728）。
 
 ---
@@ -113,10 +113,9 @@ Default thread count is the number of CPU cores (capped at runtime). If you ente
 | Option     | **找到符合条件的多连时立即暂停**                   | **Pause immediately when a valid pair is found** |
 | Option     | **群系检查**                              | **Biome check**                                  |
 
-- Results format / 结果格式：`/tp x 50 z [type=...] 面积=...`  
-  三/四连结果末尾带连级 / Triple/quadruple results end with the level: `(3)` / `(4)`  
-  `type=` 为海洋类型（低温/冻洋/其他），仅在勾选群系检查时输出  
-- **3/4 连搜索说明 / Triple & quadruple search**: 成员间中心距 ≤ 336、且通过深海群系采样后才计算共享挂机面积；可用面积须大于「最小可用面积」阈值，不达标的组合会被剔除（阈值仅对 3/4 连生效，允许范围 6728~13455，非法输入会弹窗阻止搜索）。主进度条下方有第二条进度条，显示 3/4 连的**已计算组合数 / 候选组合数**（仅 3/4 连且已筛出候选时显示）。
+- Result format / 结果格式：`/tp x 50 z [type=...] 面积=...`；triple/quadruple results end with the level `(3)` / `(4)` / 三/四连结果末尾带连级 `(3)` / `(4)`；`type=` is the ocean type (cold / frozen / others), shown only when biome check is on / `type=` 为海洋类型（低温/冻洋/其他），仅在勾选群系检查时输出
+- **Triple & quadruple search / 3/4 连搜索说明**：group members are at most 336 blocks apart and must pass deep-ocean biome sampling before the shared AFK area is computed; the usable area must strictly exceed the "Min Usable Area" threshold or the group is dropped (threshold applies to level 3/4 only, allowed range 6728~13455, invalid input pops a dialog and blocks the search). A second progress bar below the main one shows **processed combos / candidate combos** (only for level 3/4 with candidates).  
+  成员间中心距 ≤ 336、且通过深海群系采样后才计算共享挂机面积；可用面积须严格大于「最小可用面积」阈值，不达标的组合会被剔除（阈值仅对 3/4 连生效，允许范围 6728~13455，非法输入会弹窗阻止搜索）。主进度条下方有第二条进度条，显示 3/4 连的**已计算组合数 / 候选组合数**（仅 3/4 连且已筛出候选时显示）。
 
 ---
 
@@ -125,6 +124,8 @@ Default thread count is the number of CPU cores (capped at runtime). If you ente
 Import a text file (one seed per line), configure region and thread count, then click **开始搜索 / Start Search**. The tool searches each seed in order and prints seeds with at least one valid pair.
 
 导入文本文件（每行一个种子），设置区域与线程数后点击 **开始搜索 / Start Search**。程序按顺序搜索每个种子，并输出存在有效多连的种子及其结果。
+
+The batch tab also provides **Pair Level** and **Min Usable Area** settings (same meaning as Tab 1; the threshold applies to level 3/4 only).
 
 批量 Tab 同样提供**相邻神殿数**与**最小可用面积**设置（含义与 Tab 1 相同，阈值同样仅对 3/4 连生效）。
 

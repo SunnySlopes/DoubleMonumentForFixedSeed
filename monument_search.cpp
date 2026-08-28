@@ -196,7 +196,7 @@ void processChunk(
     int bz,
     int bw,
     int bh,
-    long *cellsOut)
+    long long *cellsOut)
 {
     const int W = CHUNK + 2;
     struct RegionPos {
@@ -392,9 +392,10 @@ void runMonumentSearch(
         monument_ensure_pair_upper_bounds();
 
     // Regions are never materialized: process 64x64 chunks sorted by distance to the search centre
-    const long width = std::max(0, cfg.maxX - cfg.minX);
-    const long height = std::max(0, cfg.maxZ - cfg.minZ);
-    const long totalTasks = width * height;
+    // long long: full-world width*height (~1.4e10 regions) overflows 32-bit long on Windows (LLP64)
+    const long long width = std::max(0, cfg.maxX - cfg.minX);
+    const long long height = std::max(0, cfg.maxZ - cfg.minZ);
+    const long long totalTasks = width * height;
 
     const int chunksW = (int) ((width + CHUNK - 1) / CHUNK);
     const int chunksH = (int) ((height + CHUNK - 1) / CHUNK);
@@ -425,14 +426,14 @@ void runMonumentSearch(
     int threads = numThreads > 0 ? numThreads : defaultHwThreads();
     if (progress) {
         progress->current = 0;
-        progress->total = (int) std::min(totalTasks, (long) INT_MAX);
+        progress->total = totalTasks;
         progress->status = 1;
         progress->try_pause = false;
         progress->try_stop = false;
     }
 
-    std::atomic<long> nextIndex{0};
-    std::atomic<long> completed{0};
+    std::atomic<long long> nextIndex{0};
+    std::atomic<long long> completed{0};
 
     {
         ThreadPool pool((size_t) threads);
@@ -447,20 +448,18 @@ void runMonumentSearch(
                     if (!checkProgress(progress))
                         break;
 
-                    long idx = nextIndex.fetch_add(1);
-                    if (idx >= (long) chunks.size())
+                    long long idx = nextIndex.fetch_add(1);
+                    if (idx >= (long long) chunks.size())
                         break;
 
                     const auto &base = chunks[(size_t) idx];
                     int bw = (int) std::min((long) CHUNK, (long) cfg.maxX - base.first);
                     int bh = (int) std::min((long) CHUNK, (long) cfg.maxZ - base.second);
-                    long cells = 0;
+                    long long cells = 0;
                     processChunk(ctx, g, base.first, base.second, bw, bh, &cells);
 
                     if (progress) {
-                        long done = completed.fetch_add(cells) + cells;
-                        // saturate at INT_MAX to avoid overflow to negative on huge ranges
-                        progress->current = (int) std::min(done, (long) INT_MAX);
+                        progress->current = completed.fetch_add(cells) + cells;
                     }
                 }
                 monument_generator_free(g);
@@ -469,7 +468,7 @@ void runMonumentSearch(
     }
 
     if (progress) {
-        progress->current = (int) totalTasks;
+        progress->current = totalTasks;
         progress->status = 2;
     }
 }
