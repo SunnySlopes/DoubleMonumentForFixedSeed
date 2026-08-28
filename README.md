@@ -1,4 +1,4 @@
-# Double Monument For Fixed Seed  
+# Multi Monument Finder
 # 固定种子多连海底神殿搜索工具
 
 A GUI program for searching **double / triple / quadruple ocean monuments** in Minecraft Java Edition fixed seeds. Supports Minecraft Java Edition **1.18.2** through **26.2**.
