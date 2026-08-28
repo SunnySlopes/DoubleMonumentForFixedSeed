@@ -148,8 +148,8 @@ public final class MonumentFinderBridge {
             boolean biomeCheck,
             int minGroupArea);
 
-    /** @return [processed, total, status, combosDone, combosTotal] or null */
-    public static native int[] getSearchProgress();
+    /** [current, total, status, combosDone, combosTotal] or null; combo counters are 64-bit */
+    public static native long[] getSearchProgress();
 
     public static native int[] getNowResult();
 

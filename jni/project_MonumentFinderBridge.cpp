@@ -78,23 +78,23 @@ JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_monumentSearch
     return makeIntArray(env, pairsToFlatInts(hits));
 }
 
-JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_getSearchProgress(JNIEnv *env, jclass)
+JNIEXPORT jlongArray JNICALL Java_project_MonumentFinderBridge_getSearchProgress(JNIEnv *env, jclass)
 {
     if (g_progress.total.load() == 0 && g_progress.status.load() == 0)
         return nullptr;
 
-    // stride: [current, total, status, combosDone, combosTotal]
-    jint data[5] = {
-        g_progress.current.load(),
-        g_progress.total.load(),
-        g_progress.status.load(),
+    // stride: [current, total, status, combosDone, combosTotal]; combos are 64-bit (full-world 3/4 searches overflow 32-bit counters)
+    jlong data[5] = {
+        (jlong) g_progress.current.load(),
+        (jlong) g_progress.total.load(),
+        (jlong) g_progress.status.load(),
         g_progress.combosDone.load(),
         g_progress.combosTotal.load(),
     };
-    jintArray arr = env->NewIntArray(5);
+    jlongArray arr = env->NewLongArray(5);
     if (arr == nullptr)
         return nullptr;
-    env->SetIntArrayRegion(arr, 0, 5, data);
+    env->SetLongArrayRegion(arr, 0, 5, data);
     return arr;
 }
 

@@ -34,9 +34,9 @@ JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_monumentSearch
 /*
  * Class:     project_MonumentFinderBridge
  * Method:    getSearchProgress
- * Signature: ()[I
+ * Signature: ()[J
  */
-JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_getSearchProgress
+JNIEXPORT jlongArray JNICALL Java_project_MonumentFinderBridge_getSearchProgress
   (JNIEnv *, jclass);
 
 /*

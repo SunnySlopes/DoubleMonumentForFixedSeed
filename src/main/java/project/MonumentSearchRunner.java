@@ -28,30 +28,15 @@ public class MonumentSearchRunner {
             boolean pauseOnPairFound) {
     }
 
-    public static class ProgressInfo {
-        public final long processed;
-        public final long total;
-        public final double percentage;
-        public final long elapsedMs;
-        public final long remainingMs;
-        // 3/4-combo progress: processed / total candidates (0 = unavailable)
-        public final long combosDone;
-        public final long combosTotal;
+    /**
+     * @param combosDone 3/4-combo progress: processed / total candidates (0 = unavailable)
+     */
+    public record ProgressInfo(long processed, long total, double percentage, long elapsedMs, long remainingMs,
+                               long combosDone, long combosTotal) {
+            public ProgressInfo(long processed, long total, double percentage, long elapsedMs, long remainingMs) {
+                this(processed, total, percentage, elapsedMs, remainingMs, 0, 0);
+            }
 
-        public ProgressInfo(long processed, long total, double percentage, long elapsedMs, long remainingMs) {
-            this(processed, total, percentage, elapsedMs, remainingMs, 0, 0);
-        }
-
-        public ProgressInfo(long processed, long total, double percentage, long elapsedMs, long remainingMs,
-                            long combosDone, long combosTotal) {
-            this.processed = processed;
-            this.total = total;
-            this.percentage = percentage;
-            this.elapsedMs = elapsedMs;
-            this.remainingMs = remainingMs;
-            this.combosDone = combosDone;
-            this.combosTotal = combosTotal;
-        }
     }
 
     private final int mc;
@@ -295,7 +280,7 @@ public class MonumentSearchRunner {
                     pollIncrementalResults(resultCallback, resultFormatter);
 
                     try {
-                        int[] snapshot = MonumentFinderBridge.getSearchProgress();
+                        long[] snapshot = MonumentFinderBridge.getSearchProgress();
                         if (snapshot != null && snapshot.length >= 5) {
                             lastCombosDone = snapshot[3];
                             lastCombosTotal = snapshot[4];
@@ -307,7 +292,7 @@ public class MonumentSearchRunner {
                     }
 
                     if (progressCallback != null) {
-                        int[] arr = MonumentFinderBridge.getSearchProgress();
+                        long[] arr = MonumentFinderBridge.getSearchProgress();
                         long processed;
                         long total;
                         long combosDone = 0;
@@ -414,24 +399,19 @@ public class MonumentSearchRunner {
         }
     }
 
-    private static final class CloseableScheduler implements AutoCloseable {
-        private final ScheduledExecutorService executor;
-
-        private CloseableScheduler(ScheduledExecutorService executor) {
-            this.executor = executor;
-        }
+    private record CloseableScheduler(ScheduledExecutorService executor) implements AutoCloseable {
 
         @Override
-        public void close() {
-            executor.shutdown();
-            try {
-                if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+            public void close() {
+                executor.shutdown();
+                try {
+                    if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                        executor.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
                     executor.shutdownNow();
+                    Thread.currentThread().interrupt();
                 }
-            } catch (InterruptedException e) {
-                executor.shutdownNow();
-                Thread.currentThread().interrupt();
             }
         }
-    }
 }

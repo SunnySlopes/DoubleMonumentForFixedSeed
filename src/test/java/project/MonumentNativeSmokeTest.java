@@ -36,7 +36,7 @@ public final class MonumentNativeSmokeTest {
                 minGroupArea);
         long ms = System.currentTimeMillis() - t0;
         printHits(seed, raw);
-        int[] progress = MonumentFinderBridge.getSearchProgress();
+        long[] progress = MonumentFinderBridge.getSearchProgress();
         if (progress != null) {
             System.out.printf("Progress: %d / %d status=%d (%d ms)%n",
                     progress[0], progress[1], progress[2], ms);

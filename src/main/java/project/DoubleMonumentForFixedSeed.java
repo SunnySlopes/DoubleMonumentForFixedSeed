@@ -1193,20 +1193,20 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         SwingUtilities.invokeLater(() -> {
             if (!isSearchRunning) return;
 
-            int progress = (int) Math.min(100, info.percentage);
+            int progress = (int) Math.min(100, info.percentage());
             searchProgressBar.setValue(progress);
-            searchProgressBar.setString(getString("progress.format", info.processed, info.total, info.percentage));
+            searchProgressBar.setString(getString("progress.format", info.processed(), info.total(), info.percentage()));
 
             // Combo progress bar (pair level 3/4, once candidate groups exist)
             if (getSelectedPairLevel(pairLevelComboBox) >= 3) {
-                updateComboProgress(searchComboProgressBar, info.combosDone, info.combosTotal);
+                updateComboProgress(searchComboProgressBar, info.combosDone(), info.combosTotal());
             }
             
             // Keep timers frozen while paused
             if (!isSearchPaused) {
-                searchElapsedTimeLabel.setText(getString("elapsedTime", formatTime(info.elapsedMs)));
-                if (info.remainingMs > 0) {
-                    searchRemainingTimeLabel.setText(getString("remainingTime", formatTime(info.remainingMs)));
+                searchElapsedTimeLabel.setText(getString("elapsedTime", formatTime(info.elapsedMs())));
+                if (info.remainingMs() > 0) {
+                    searchRemainingTimeLabel.setText(getString("remainingTime", formatTime(info.remainingMs())));
                 } else {
                     searchRemainingTimeLabel.setText(getString("remainingTime.calculating"));
                 }
@@ -1214,7 +1214,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 searchRemainingTimeLabel.setText(getString("remainingTime.paused"));
             }
 
-            if (info.processed >= info.total) {
+            if (info.processed() >= info.total()) {
                 isSearchRunning = false;
                 isSearchPaused = false;
                 searchStartButton.setEnabled(true);
@@ -1238,7 +1238,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 maxXField.setEnabled(true);
                 minZField.setEnabled(true);
                 maxZField.setEnabled(true);
-                searchProgressBar.setString(getString("progress.complete", info.processed, info.total));
+                searchProgressBar.setString(getString("progress.complete", info.processed(), info.total()));
                 searchRemainingTimeLabel.setText(getString("remainingTime.completed"));
             }
         });
