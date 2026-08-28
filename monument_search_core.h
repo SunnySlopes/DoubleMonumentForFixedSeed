@@ -80,7 +80,7 @@ int monument_classify_ocean_type_g(
     int centerX,
     int centerZ);
 
-/** Best AFK coverage for n (1..4) monuments: 128-block spawning circle, 58x58 box each (getOptimalAfk model, ties averaged like quadbase.c); outputs the optimal AFK point if requested. @return covered spawning blocks. */
+/** Best AFK coverage for n (1..4) monuments: 128-block spawning circle, 58x58 box anchored at [pos-29, pos+28] per monument (in-game verified; same coverage model as cubiomes getOptimalAfk, ties averaged like quadbase.c); outputs the optimal AFK point if requested. @return covered spawning blocks. */
 int monument_afk_coverage(
     const MonumentBlockPos *p,
     int n,

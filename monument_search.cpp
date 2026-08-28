@@ -112,11 +112,6 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
     if (ctx.out->full())
         return;
 
-    // 3/4-combo counting: +1 candidate on pre-screen; every exit path marks it processed
-    const bool counted = nn >= 3 && ctx.progress != nullptr;
-    if (counted)
-        ctx.progress->combosTotal.fetch_add(1, std::memory_order_relaxed);
-
     // Early reject: group coverage <= sum_i min_{j!=i} U2(dist_ij); bound <= threshold means even the best AFK point falls short, skip exact computation.
     long long bound = 0;
     for (int i = 0; i < nn; i++) {
@@ -133,8 +128,6 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
         bound += m;
     }
     if (bound <= ctx.cfg.minGroupArea) {
-        if (counted)
-            ctx.progress->combosDone.fetch_add(1, std::memory_order_relaxed);
         return;
     }
 
@@ -144,8 +137,6 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
 
     // Area must strictly exceed the threshold (== best-pair area = no gain, i.e. noise)
     if (groupArea <= ctx.cfg.minGroupArea) {
-        if (counted)
-            ctx.progress->combosDone.fetch_add(1, std::memory_order_relaxed);
         return;
     }
 
@@ -165,8 +156,6 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
         }
     }
     if (!keep) {
-        if (counted)
-            ctx.progress->combosDone.fetch_add(1, std::memory_order_relaxed);
         return;
     }
 
@@ -185,8 +174,6 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
     hit.count = nn;
     hit.area = groupArea;
     ctx.out->addResult(hit);
-    if (counted)
-        ctx.progress->combosDone.fetch_add(1, std::memory_order_relaxed);
 }
 
 void processChunk(

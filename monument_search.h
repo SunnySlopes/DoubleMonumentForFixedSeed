@@ -9,9 +9,6 @@ struct Progress {
     std::atomic<long long> current{0};
     std::atomic<long long> total{0};
     std::atomic_int status{0};
-    // 3/4-combo progress: combosTotal = pre-screened candidates, combosDone = processed; 64-bit: full-world searches exceed 2^31 candidates
-    std::atomic<long long> combosDone{0};
-    std::atomic<long long> combosTotal{0};
     std::atomic_bool try_pause{false};
     std::atomic_bool try_stop{false};
 };

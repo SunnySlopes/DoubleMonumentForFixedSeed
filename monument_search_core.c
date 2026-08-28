@@ -215,9 +215,9 @@ int monument_classify_ocean_type(
 // AFK position attracts (keeps alive) every spawning block within euclidean distance 128 on the horizontal plane.
 static const double AFK_RSQ = 128.0 * 128.0;
 
-// getStructurePos returns the region chunk corner; in-game centre is corner+8 and the 58x58 box spans [pos-21, pos+36] (in-game verified). Area is anchor-invariant but the reported AFK point is only correct with this anchor.
-#define AFK_BOX_LO(ax) (8 - ((ax) + 1) / 2)        // -21 for 58
-#define AFK_BOX_HI(ax) (AFK_BOX_LO(ax) + (ax) - 1) // +36 for 58
+// getStructurePos returns the region chunk corner; the 58x58 box spans [pos-29, pos+28] (centre = pos, in-game verified 2026-08-28). Area is anchor-invariant but the reported AFK point is only correct with this anchor.
+#define AFK_BOX_LO(ax) (-(((ax) + 1) / 2))         // -29 for 58
+#define AFK_BOX_HI(ax) (AFK_BOX_LO(ax) + (ax) - 1) // +28 for 58
 
 typedef struct {
     const MonumentBlockPos *p;
@@ -533,7 +533,7 @@ void monument_ensure_pair_upper_bounds(void)
             MonumentBlockPos p[2] = {{0, 0}, {i * 16, j * 16}};
             MonumentBlockPos best = {0, 0};
             int bestCnt = -1;
-            // window: bounding rectangle of both box extents [pos-21, pos+36]
+            // window: bounding rectangle of both box extents [pos-29, pos+28]
             int w = i * 16 + box;
             int h = j * 16 + box;
             afk_coverage_exact(p, 2, AFK_BOX_LO(box), AFK_BOX_LO(box), w, h,

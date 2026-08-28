@@ -28,15 +28,7 @@ public class MonumentSearchRunner {
             boolean pauseOnPairFound) {
     }
 
-    /**
-     * @param combosDone 3/4-combo progress: processed / total candidates (0 = unavailable)
-     */
-    public record ProgressInfo(long processed, long total, double percentage, long elapsedMs, long remainingMs,
-                               long combosDone, long combosTotal) {
-            public ProgressInfo(long processed, long total, double percentage, long elapsedMs, long remainingMs) {
-                this(processed, total, percentage, elapsedMs, remainingMs, 0, 0);
-            }
-
+    public record ProgressInfo(long processed, long total, double percentage, long elapsedMs, long remainingMs) {
     }
 
     private final int mc;
@@ -48,17 +40,6 @@ public class MonumentSearchRunner {
     private final List<String> results = new ArrayList<>();
     private final Set<String> emittedResults = new HashSet<>();
     private volatile Thread searchThread;
-    // latest polled 3/4-combo counters snapshot (for the batch search UI poller)
-    private volatile long lastCombosDone = 0;
-    private volatile long lastCombosTotal = 0;
-
-    public long getCombosDone() {
-        return lastCombosDone;
-    }
-
-    public long getCombosTotal() {
-        return lastCombosTotal;
-    }
 
     public MonumentSearchRunner(int mc) {
         this.mc = mc;
@@ -241,8 +222,6 @@ public class MonumentSearchRunner {
         totalPausedMs.set(0);
         pauseStartMs = 0;
         runStartTimeMs = System.currentTimeMillis();
-        lastCombosDone = 0;
-        lastCombosTotal = 0;
 
         synchronized (results) {
             results.clear();
@@ -279,33 +258,15 @@ public class MonumentSearchRunner {
                 try {
                     pollIncrementalResults(resultCallback, resultFormatter);
 
-                    try {
-                        long[] snapshot = MonumentFinderBridge.getSearchProgress();
-                        if (snapshot != null && snapshot.length >= 5) {
-                            lastCombosDone = snapshot[3];
-                            lastCombosTotal = snapshot[4];
-                        } else {
-                            lastCombosDone = 0;
-                            lastCombosTotal = 0;
-                        }
-                    } catch (Throwable ignored) {
-                    }
-
                     if (progressCallback != null) {
                         long[] arr = MonumentFinderBridge.getSearchProgress();
                         long processed;
                         long total;
-                        long combosDone = 0;
-                        long combosTotal = 0;
                         if (arr != null && arr.length >= 2) {
                             processed = arr[0];
                             total = Math.max(arr[1], 1L);
                             lastProcessed.set(processed);
                             lastTotal.set(total);
-                            if (arr.length >= 5) {
-                                combosDone = arr[3];
-                                combosTotal = arr[4];
-                            }
                         } else {
                             processed = lastProcessed.get();
                             total = lastTotal.get();
@@ -319,8 +280,7 @@ public class MonumentSearchRunner {
                             remaining = elapsed * (total - processed) / processed;
                         }
                         double pct = total > 0 ? processed * 100.0 / total : 0;
-                        progressCallback.accept(new ProgressInfo(processed, total, pct, elapsed, remaining,
-                                combosDone, combosTotal));
+                        progressCallback.accept(new ProgressInfo(processed, total, pct, elapsed, remaining));
                     }
                 } catch (Throwable ignored) {
                 }

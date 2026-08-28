@@ -61,8 +61,6 @@ JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_monumentSearch
     g_progress.current = 0;
     g_progress.total = 0;
     g_progress.status = 0;
-    g_progress.combosDone = 0;
-    g_progress.combosTotal = 0;
     g_progress.try_pause = false;
     g_progress.try_stop = false;
 
@@ -83,18 +81,16 @@ JNIEXPORT jlongArray JNICALL Java_project_MonumentFinderBridge_getSearchProgress
     if (g_progress.total.load() == 0 && g_progress.status.load() == 0)
         return nullptr;
 
-    // stride: [current, total, status, combosDone, combosTotal]; combos are 64-bit (full-world 3/4 searches overflow 32-bit counters)
-    jlong data[5] = {
-        (jlong) g_progress.current.load(),
-        (jlong) g_progress.total.load(),
-        (jlong) g_progress.status.load(),
-        g_progress.combosDone.load(),
-        g_progress.combosTotal.load(),
+    // stride: [current, total, status]; 64-bit (full-world searches exceed 2^31 regions)
+    jlong data[3] = {
+        g_progress.current.load(),
+        g_progress.total.load(),
+        g_progress.status.load(),
     };
-    jlongArray arr = env->NewLongArray(5);
+    jlongArray arr = env->NewLongArray(3);
     if (arr == nullptr)
         return nullptr;
-    env->SetLongArrayRegion(arr, 0, 5, data);
+    env->SetLongArrayRegion(arr, 0, 3, data);
     return arr;
 }
 

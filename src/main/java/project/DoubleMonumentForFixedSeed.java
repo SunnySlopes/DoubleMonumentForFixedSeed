@@ -115,7 +115,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JButton batchExportSeedsButton;
     private JButton batchSortButton;
     private JProgressBar batchProgressBar;
-    private JProgressBar batchComboProgressBar;
     private JLabel batchElapsedTimeLabel;
     private JLabel batchRemainingTimeLabel;
     private JTextArea batchResultArea;
@@ -316,16 +315,14 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         return getString("error.nativeNotLoaded", "");
     }
 
-    /** Threshold field and combo progress bar are shown only for pair level 3/4 */
+    /** Threshold field is shown only for pair level 3/4 */
     private void updateThresholdVisibility() {
         boolean singleVisible = getSelectedPairLevel(pairLevelComboBox) >= 3;
         if (searchMinGroupAreaLabel != null) searchMinGroupAreaLabel.setVisible(singleVisible);
         if (searchMinGroupAreaField != null) searchMinGroupAreaField.setVisible(singleVisible);
-        if (searchComboProgressBar != null) searchComboProgressBar.setVisible(false);
         boolean batchVisible = getSelectedPairLevel(batchPairLevelComboBox) >= 3;
         if (batchMinGroupAreaLabel != null) batchMinGroupAreaLabel.setVisible(batchVisible);
         if (batchMinGroupAreaField != null) batchMinGroupAreaField.setVisible(batchVisible);
-        if (batchComboProgressBar != null) batchComboProgressBar.setVisible(false);
     }
 
     /**
@@ -344,19 +341,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         } catch (NumberFormatException ignored) {
         }
         return -1;
-    }
-
-    /** Combo progress bar is hidden entirely when no candidate groups exist (total <= 0) */
-    private void updateComboProgress(JProgressBar bar, long done, long total) {
-        if (total > 0) {
-            bar.setVisible(true);
-            long safeDone = Math.max(0, Math.min(done, total));
-            int pct = (int) Math.min(100, safeDone * 100 / total);
-            bar.setValue(pct);
-            bar.setString(getString("comboProgress.format", safeDone, total));
-        } else {
-            bar.setVisible(false);
-        }
     }
 
     private JPanel createSearchPanel() {
@@ -598,13 +582,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         searchProgressBar.setStringPainted(true);
         searchProgressBar.setString(getString("progress.initial"));
         progressPanel.add(searchProgressBar, pgc);
-
-        pgc.gridwidth = 2;
-        pgc.gridy = 4;
-        searchComboProgressBar = new JProgressBar(0, 100);
-        searchComboProgressBar.setStringPainted(true);
-        searchComboProgressBar.setVisible(false);
-        progressPanel.add(searchComboProgressBar, pgc);
 
         pgc.gridwidth = 1;
         pgc.gridy = 1;
@@ -1197,11 +1174,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             searchProgressBar.setValue(progress);
             searchProgressBar.setString(getString("progress.format", info.processed(), info.total(), info.percentage()));
 
-            // Combo progress bar (pair level 3/4, once candidate groups exist)
-            if (getSelectedPairLevel(pairLevelComboBox) >= 3) {
-                updateComboProgress(searchComboProgressBar, info.combosDone(), info.combosTotal());
-            }
-            
             // Keep timers frozen while paused
             if (!isSearchPaused) {
                 searchElapsedTimeLabel.setText(getString("elapsedTime", formatTime(info.elapsedMs())));
@@ -1575,13 +1547,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         batchProgressBar.setString(getString("progress.initial"));
         progressPanel.add(batchProgressBar, pgc);
 
-        pgc.gridwidth = 2;
-        pgc.gridy = 4;
-        batchComboProgressBar = new JProgressBar(0, 100);
-        batchComboProgressBar.setStringPainted(true);
-        batchComboProgressBar.setVisible(false);
-        progressPanel.add(batchComboProgressBar, pgc);
-
         pgc.gridwidth = 1;
         pgc.gridy = 1;
         batchElapsedTimeLabel = new JLabel(getString("elapsedTime.initial"));
@@ -1908,14 +1873,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                             return;
                         }
 
-                        // Per-seed combo progress (pair level 3/4, once candidate groups exist)
-                        final MonumentSearchRunner comboSearcher = batchSearcher;
-                        SwingUtilities.invokeLater(() -> {
-                            if (getSelectedPairLevel(batchPairLevelComboBox) >= 3) {
-                                updateComboProgress(batchComboProgressBar,
-                                        comboSearcher.getCombosDone(), comboSearcher.getCombosTotal());
-                            }
-                        });
                     }
                     
                     synchronized (this) {
