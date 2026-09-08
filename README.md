@@ -113,7 +113,7 @@ Default thread count is the number of CPU cores (capped at runtime). If you ente
 | Option     | **找到符合条件的多连时立即暂停**                   | **Pause immediately when a valid pair is found** |
 | Option     | **群系检查**                              | **Biome check**                                  |
 
-- Result format / 结果格式：`/tp x 50 z [type=...] 面积=...`；triple/quadruple results end with the level `(3)` / `(4)` / 三/四连结果末尾带连级 `(3)` / `(4)`；`type=` is the ocean type (cold / frozen / others), shown only when biome check is on / `type=` 为海洋类型（低温/冻洋/其他），仅在勾选群系检查时输出
+- Result format / 结果格式：`/tp x 50 z [type=...] 面积=...`；triple/quadruple results end with the level `(3)` / `(4)` / 三/四连结果末尾带相邻海底神殿数 `(3)` / `(4)`；`type=` is the ocean type (cold / frozen / others), shown only when biome check is on / `type=` 为海洋类型（低温/冻洋/其他），仅在勾选群系检查时输出
 - **Triple & quadruple search / 3/4 连搜索说明**：group members are at most 336 blocks apart and must pass deep-ocean biome sampling before the shared AFK area is computed; the usable area must strictly exceed the "Min Usable Area" threshold or the group is dropped (threshold applies to level 3/4 only, allowed range 6728~13455, invalid input pops a dialog and blocks the search).  
   成员间中心距 ≤ 336、且通过深海群系采样后才计算共享挂机面积；可用面积须严格大于「最小可用面积」阈值，不达标的组合会被剔除（阈值仅对 3/4 连生效，允许范围 6728~13455，非法输入会弹窗阻止搜索）。
 
