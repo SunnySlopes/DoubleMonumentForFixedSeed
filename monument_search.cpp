@@ -81,6 +81,10 @@ PairCheckResult checkCanFormPair(const MonumentPos &pos1, const MonumentPos &pos
     int dx = std::abs(pos2.x - pos1.x);
     int dz = std::abs(pos2.z - pos1.z);
 
+    // A monument cannot be paired with itself.
+    if (dx == 0 && dz == 0)
+        return {false, false};
+
     if (dx % 16 != 0 || dz % 16 != 0)
         return {false, false};
 
@@ -118,6 +122,10 @@ bool isInSearchRange(const SearchContext &ctx, const MonumentPos &pos)
 
 void addPairResult(SearchContext &ctx, const MonumentPos &pos1, const MonumentPos &pos2, bool lowEfficiency)
 {
+    // Defensive guard against degenerate self-pairs (dx=0, dz=0).
+    if (pos1.x == pos2.x && pos1.z == pos2.z)
+        return;
+
     uint64_t key = pairKey(pos1.x, pos1.z, pos2.x, pos2.z);
     {
         std::lock_guard<std::mutex> lock(ctx.pairsMu);
@@ -156,9 +164,9 @@ void checkPairsWithOutsidePositions(
                 continue;
             }
 
-            MonumentPos otherPos{otherX, otherZ};
-            PairCheckResult check = checkCanFormPair(inRangePos, otherPos);
-            if (!check.canFormPair)
+            MonumentPos probe{otherX, otherZ};
+            PairCheckResult probeCheck = checkCanFormPair(inRangePos, probe);
+            if (!probeCheck.canFormPair)
                 continue;
 
             int actualX = 0, actualZ = 0;
@@ -168,7 +176,22 @@ void checkPairsWithOutsidePositions(
             }
 
             MonumentPos actual{actualX, actualZ};
-            addPairResult(ctx, inRangePos, actual, check.isLowEfficiency);
+
+            // This probe exists only to find partners beyond the enumerated range.
+            // The structure lookup can resolve back to the source monument (which
+            // used to produce a bogus dx=0, dz=0 entry at negative region borders)
+            // or to another monument that is already covered by the in-range path.
+            if ((actual.x == inRangePos.x && actual.z == inRangePos.z) ||
+                isInSearchRange(ctx, actual)) {
+                continue;
+            }
+
+            // Re-evaluate the geometry on the resolved position instead of the probe.
+            PairCheckResult actualCheck = checkCanFormPair(inRangePos, actual);
+            if (!actualCheck.canFormPair)
+                continue;
+
+            addPairResult(ctx, inRangePos, actual, actualCheck.isLowEfficiency);
         }
     }
 }
