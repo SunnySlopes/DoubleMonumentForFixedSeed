@@ -38,21 +38,21 @@ static int classify_ocean_point(const BiomeNoise *bn, int blockX, int blockZ)
     return OCEAN_TYPE_OTHERS;
 }
 
-struct MonumentGenerator {
+struct DmMonumentGenerator {
     Generator gen;
 };
 
-MonumentGenerator *monument_generator_alloc(void)
+DmMonumentGenerator *dm_monument_generator_alloc(void)
 {
-    return (MonumentGenerator *) calloc(1, sizeof(MonumentGenerator));
+    return (DmMonumentGenerator *) calloc(1, sizeof(DmMonumentGenerator));
 }
 
-void monument_generator_free(MonumentGenerator *g)
+void dm_monument_generator_free(DmMonumentGenerator *g)
 {
     free(g);
 }
 
-void monument_init_generator(MonumentGenerator *g, int mc, uint64_t seed)
+void dm_monument_init_generator(DmMonumentGenerator *g, int mc, uint64_t seed)
 {
     if (!g)
         return;
@@ -60,13 +60,13 @@ void monument_init_generator(MonumentGenerator *g, int mc, uint64_t seed)
     applySeed(&g->gen, DIM_OVERWORLD, seed);
 }
 
-static int check_viable(MonumentGenerator *g, int blockX, int blockZ)
+static int check_viable(DmMonumentGenerator *g, int blockX, int blockZ)
 {
     return isViableStructurePos(Monument, &g->gen, blockX, blockZ, 0);
 }
 
-int monument_try_region_g(
-    MonumentGenerator *g,
+int dm_monument_try_region_g(
+    DmMonumentGenerator *g,
     int mc,
     uint64_t seed,
     int regX,
@@ -93,7 +93,7 @@ int monument_try_region_g(
     return 1;
 }
 
-int monument_try_region(
+int dm_monument_try_region(
     uint64_t seed,
     int mc,
     int regX,
@@ -101,13 +101,13 @@ int monument_try_region(
     int *outBlockX,
     int *outBlockZ)
 {
-    MonumentGenerator g;
-    monument_init_generator(&g, mc, seed);
-    return monument_try_region_g(&g, mc, seed, regX, regZ, outBlockX, outBlockZ);
+    DmMonumentGenerator g;
+    dm_monument_init_generator(&g, mc, seed);
+    return dm_monument_try_region_g(&g, mc, seed, regX, regZ, outBlockX, outBlockZ);
 }
 
-int monument_exists_at_block_g(
-    MonumentGenerator *g,
+int dm_monument_exists_at_block_g(
+    DmMonumentGenerator *g,
     int mc,
     uint64_t seed,
     int targetX,
@@ -120,7 +120,7 @@ int monument_exists_at_block_g(
     int blockX = 0;
     int blockZ = 0;
 
-    if (!monument_try_region_g(g, mc, seed, regionX, regionZ, &blockX, &blockZ))
+    if (!dm_monument_try_region_g(g, mc, seed, regionX, regionZ, &blockX, &blockZ))
         return 0;
 
     const int tolerance = 16;
@@ -134,7 +134,7 @@ int monument_exists_at_block_g(
     return 1;
 }
 
-int monument_exists_at_block(
+int dm_monument_exists_at_block(
     uint64_t seed,
     int mc,
     int targetX,
@@ -142,13 +142,13 @@ int monument_exists_at_block(
     int *outBlockX,
     int *outBlockZ)
 {
-    MonumentGenerator g;
-    monument_init_generator(&g, mc, seed);
-    return monument_exists_at_block_g(&g, mc, seed, targetX, targetZ, outBlockX, outBlockZ);
+    DmMonumentGenerator g;
+    dm_monument_init_generator(&g, mc, seed);
+    return dm_monument_exists_at_block_g(&g, mc, seed, targetX, targetZ, outBlockX, outBlockZ);
 }
 
-int monument_classify_ocean_type_g(
-    MonumentGenerator *g,
+int dm_monument_classify_ocean_type_g(
+    DmMonumentGenerator *g,
     int mc,
     int centerX,
     int centerZ)
@@ -178,13 +178,13 @@ int monument_classify_ocean_type_g(
     return OCEAN_TYPE_OTHERS;
 }
 
-int monument_classify_ocean_type(
+int dm_monument_classify_ocean_type(
     int mc,
     uint64_t seed,
     int centerX,
     int centerZ)
 {
-    MonumentGenerator g;
-    monument_init_generator(&g, mc, seed);
-    return monument_classify_ocean_type_g(&g, mc, centerX, centerZ);
+    DmMonumentGenerator g;
+    dm_monument_init_generator(&g, mc, seed);
+    return dm_monument_classify_ocean_type_g(&g, mc, centerX, centerZ);
 }

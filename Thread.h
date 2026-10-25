@@ -1,5 +1,13 @@
-#ifndef MONUMENT_FINDER_THREAD_H
-#define MONUMENT_FINDER_THREAD_H
+/*
+ * Thread pool and result container for the double monument kernel.
+ *
+ * The include guard and the class names are AIO-specific: the multimonument
+ * and dripstonecave kernels compile into the same module and define their own
+ * Thread.h-style containers.
+ */
+
+#ifndef AIO_DOUBLE_MONUMENT_THREAD_H
+#define AIO_DOUBLE_MONUMENT_THREAD_H
 
 #include <atomic>
 #include <condition_variable>
@@ -10,7 +18,7 @@
 #include <vector>
 
 template<typename T>
-class ThreadSafeResults {
+class DoubleResults {
     std::priority_queue<T> results_;
     mutable std::mutex mutex_{};
 
@@ -58,7 +66,7 @@ public:
     }
 };
 
-class ThreadPool {
+class DoublePool {
     std::vector<std::thread> workers;
     std::queue<std::function<void()>> tasks;
     std::mutex queueMutex;
@@ -66,7 +74,7 @@ class ThreadPool {
     std::atomic<bool> stop{false};
 
 public:
-    explicit ThreadPool(size_t threads)
+    explicit DoublePool(size_t threads)
     {
         for (size_t i = 0; i < threads; ++i) {
             workers.emplace_back([this] {
@@ -98,7 +106,7 @@ public:
         condition.notify_one();
     }
 
-    ~ThreadPool()
+    ~DoublePool()
     {
         stop = true;
         condition.notify_all();

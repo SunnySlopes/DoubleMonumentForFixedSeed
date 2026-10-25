@@ -25,9 +25,9 @@ struct PairCheckResult {
 };
 
 struct SearchContext {
-    MonumentSearchConfig cfg;
-    Progress *progress = nullptr;
-    ThreadSafeResults<PairHit> *out = nullptr;
+    DoubleMonumentConfig cfg;
+    DoubleProgress *progress = nullptr;
+    DoubleResults<DoublePairHit> *out = nullptr;
 
     int centerRegX = 0;
     int centerRegZ = 0;
@@ -64,7 +64,7 @@ uint64_t pairKey(int x1, int z1, int x2, int z2)
     return (posKey(minX, minZ) << 1) ^ posKey(maxX, maxZ);
 }
 
-bool checkProgress(Progress *progress)
+bool checkProgress(DoubleProgress *progress)
 {
     if (!progress)
         return true;
@@ -125,7 +125,7 @@ void addPairResult(SearchContext &ctx, const MonumentPos &pos1, const MonumentPo
             return;
     }
 
-    PairHit hit;
+    DoublePairHit hit;
     hit.hangX = (pos1.x + pos2.x) / 2;
     hit.hangZ = (pos1.z + pos2.z) / 2;
     hit.dx = std::abs(pos2.x - pos1.x);
@@ -140,7 +140,7 @@ void addPairResult(SearchContext &ctx, const MonumentPos &pos1, const MonumentPo
 
 void checkPairsWithOutsidePositions(
     SearchContext &ctx,
-    MonumentGenerator *g,
+    DmMonumentGenerator *g,
     const MonumentPos &inRangePos)
 {
     for (int dx = -192; dx <= 192; dx += 16) {
@@ -162,7 +162,7 @@ void checkPairsWithOutsidePositions(
                 continue;
 
             int actualX = 0, actualZ = 0;
-            if (!monument_exists_at_block_g(
+            if (!dm_monument_exists_at_block_g(
                     g, ctx.cfg.mc, ctx.cfg.seed, otherX, otherZ, &actualX, &actualZ)) {
                 continue;
             }
@@ -173,7 +173,7 @@ void checkPairsWithOutsidePositions(
     }
 }
 
-void checkPairsIncremental(SearchContext &ctx, MonumentGenerator *g, const MonumentPos &newPos)
+void checkPairsIncremental(SearchContext &ctx, DmMonumentGenerator *g, const MonumentPos &newPos)
 {
     std::vector<MonumentPos> snapshot;
     {
@@ -196,7 +196,7 @@ void checkPairsIncremental(SearchContext &ctx, MonumentGenerator *g, const Monum
         checkPairsWithOutsidePositions(ctx, g, newPos);
 }
 
-void tryAddMonument(SearchContext &ctx, MonumentGenerator *g, int monumentX, int monumentZ)
+void tryAddMonument(SearchContext &ctx, DmMonumentGenerator *g, int monumentX, int monumentZ)
 {
     MonumentPos pos{monumentX, monumentZ};
     uint64_t key = posKey(monumentX, monumentZ);
@@ -212,14 +212,14 @@ void tryAddMonument(SearchContext &ctx, MonumentGenerator *g, int monumentX, int
         checkPairsIncremental(ctx, g, pos);
 }
 
-void processRegion(SearchContext &ctx, MonumentGenerator *g, int regX, int regZ)
+void processRegion(SearchContext &ctx, DmMonumentGenerator *g, int regX, int regZ)
 {
     if (!checkProgress(ctx.progress))
         return;
 
     int monumentX = 0;
     int monumentZ = 0;
-    if (!monument_try_region_g(g, ctx.cfg.mc, ctx.cfg.seed, regX, regZ, &monumentX, &monumentZ))
+    if (!dm_monument_try_region_g(g, ctx.cfg.mc, ctx.cfg.seed, regX, regZ, &monumentX, &monumentZ))
         return;
 
     tryAddMonument(ctx, g, monumentX, monumentZ);
@@ -227,10 +227,10 @@ void processRegion(SearchContext &ctx, MonumentGenerator *g, int regX, int regZ)
 
 } // namespace
 
-void runMonumentSearch(
-    const MonumentSearchConfig &cfg,
-    Progress *progress,
-    ThreadSafeResults<PairHit> &out,
+void runDoubleMonumentSearch(
+    const DoubleMonumentConfig &cfg,
+    DoubleProgress *progress,
+    DoubleResults<DoublePairHit> &out,
     int numThreads) {
     SearchContext ctx;
     ctx.cfg = cfg;
@@ -282,13 +282,13 @@ void runMonumentSearch(
     std::atomic<long> completed{0};
 
     {
-        ThreadPool pool((size_t) threads);
+        DoublePool pool((size_t) threads);
         for (int t = 0; t < threads; t++) {
             pool.enqueue([&]() {
-                MonumentGenerator *g = monument_generator_alloc();
+                DmMonumentGenerator *g = dm_monument_generator_alloc();
                 if (!g)
                     return;
-                monument_init_generator(g, ctx.cfg.mc, ctx.cfg.seed);
+                dm_monument_init_generator(g, ctx.cfg.mc, ctx.cfg.seed);
 
                 while (true) {
                     if (!checkProgress(progress))
@@ -306,7 +306,7 @@ void runMonumentSearch(
                         progress->current = (int) std::min(done, totalTasks);
                     }
                 }
-                monument_generator_free(g);
+                dm_monument_generator_free(g);
             });
         }
     }

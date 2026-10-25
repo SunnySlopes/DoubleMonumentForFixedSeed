@@ -1,5 +1,13 @@
-#ifndef MONUMENT_SEARCH_CORE_H
-#define MONUMENT_SEARCH_CORE_H
+/*
+ * cubiomes helpers for the double monument kernel.
+ *
+ * All symbols are prefixed with `dm_` / `Dm` because this translation unit is
+ * linked together with the multimonument and dripstonecave kernels, which
+ * also export monument_* / MonumentGenerator names.
+ */
+
+#ifndef AIO_DOUBLE_MONUMENT_CORE_H
+#define AIO_DOUBLE_MONUMENT_CORE_H
 
 #include <stdint.h>
 
@@ -8,15 +16,15 @@ extern "C" {
 #endif
 
 /** Opaque cubiomes Generator wrapper (defined only in .c). */
-typedef struct MonumentGenerator MonumentGenerator;
+typedef struct DmMonumentGenerator DmMonumentGenerator;
 
-MonumentGenerator *monument_generator_alloc(void);
-void monument_generator_free(MonumentGenerator *g);
+DmMonumentGenerator *dm_monument_generator_alloc(void);
+void dm_monument_generator_free(DmMonumentGenerator *g);
 
-void monument_init_generator(MonumentGenerator *g, int mc, uint64_t seed);
+void dm_monument_init_generator(DmMonumentGenerator *g, int mc, uint64_t seed);
 
 /** @return 1 if monument exists at region and passes deep-ocean viability */
-int monument_try_region(
+int dm_monument_try_region(
     uint64_t seed,
     int mc,
     int regX,
@@ -25,8 +33,8 @@ int monument_try_region(
     int *outBlockZ);
 
 /** Uses an already-initialized generator (no setupGenerator per call). */
-int monument_try_region_g(
-    MonumentGenerator *g,
+int dm_monument_try_region_g(
+    DmMonumentGenerator *g,
     int mc,
     uint64_t seed,
     int regX,
@@ -35,7 +43,7 @@ int monument_try_region_g(
     int *outBlockZ);
 
 /** @return 1 if a monument exists near block (targetX,targetZ) within tolerance */
-int monument_exists_at_block(
+int dm_monument_exists_at_block(
     uint64_t seed,
     int mc,
     int targetX,
@@ -43,8 +51,8 @@ int monument_exists_at_block(
     int *outBlockX,
     int *outBlockZ);
 
-int monument_exists_at_block_g(
-    MonumentGenerator *g,
+int dm_monument_exists_at_block_g(
+    DmMonumentGenerator *g,
     int mc,
     uint64_t seed,
     int targetX,
@@ -53,14 +61,14 @@ int monument_exists_at_block_g(
     int *outBlockZ);
 
 /** Ocean type at pair center: 0=others, 1=cold, 2=frozen */
-int monument_classify_ocean_type(
+int dm_monument_classify_ocean_type(
     int mc,
     uint64_t seed,
     int centerX,
     int centerZ);
 
-int monument_classify_ocean_type_g(
-    MonumentGenerator *g,
+int dm_monument_classify_ocean_type_g(
+    DmMonumentGenerator *g,
     int mc,
     int centerX,
     int centerZ);

@@ -1,130 +1,128 @@
-# Double Monument For Fixed Seed  
-# 固定种子二联海底神殿搜索工具
+# Double Monument Core
 
-A GUI program for searching **double ocean monuments** (paired ocean monuments) in Minecraft Java Edition fixed seeds. Supports Minecraft Java Edition **1.18.2** through **26.2**.
+**All-In-One Finder 的二联海底神殿搜索内核**（`all-in-one-base` 分支，tag `aio-lib-v1`）。
 
-用于在 Minecraft Java 版固定种子中搜索**二联海底神殿**（成对生成的海底神殿）的图形界面工具。支持 **1.18.2** 至 **26.2**。
+本仓库原来是带 Swing 界面的独立工具；这个分支只保留纯 C/C++ 算法与
+cubiomes 封装，删除了 Java、JNI、字体/图标、Gradle 构建壳和自带的
+cubiomes 子模块。算法、配对阈值和结果字段都没有改动，只是给导出符号加了
+`Double*` / `dm_*` 前缀，避免与 AIO 中已编译的 dripstonecave、multimonument、
+fortress 内核撞名。
 
-Search uses **cubiomes** via a native library (JNI): monument positions and **deep-ocean biome viability** (`isViableStructurePos` for monuments). Results may differ from older versions that used custom climate noise thresholds.
-
-搜索通过 **cubiomes** 原生库（JNI）实现：计算神殿位置并判定**深海群系是否可行**（`isViableStructurePos`）。与旧版基于自定义气候噪声阈值的实现相比，结果可能略有不同。
-
-The UI supports **Chinese / English** switching (single-seed tab). Default language follows the system locale.
-
-界面支持**中 / 英**切换（单种子搜索 Tab）。默认语言随系统 Locale 自动选择。
-
----
-
-## Requirements / 环境要求
-
-- **Java 17+**
-- **Windows / Linux / macOS** (native library built per platform)  
-  **Windows / Linux / macOS**（需按平台编译原生库）
-- To build the native library: **CMake**, **Ninja**, **MinGW gcc/g++** (e.g. MSYS2 `ucrt64`)  
-  编译原生库需要：**CMake**、**Ninja**、**MinGW gcc/g++**（如 MSYS2 `ucrt64`）
+- 无 Java / JNI / Swing / UI / Gradle；
+- 不定义 `main`，不限制结果条数；
+- C++20 + C11，只依赖 cubiomes、标准库和 `pthread`；
+- 可直接把 4 个源文件交给 All-In-One Finder 的 CMake 编译。
 
 ---
 
-## Build from source / 从源码构建
+## 文件
 
-```bash
-git submodule update --init --recursive
-./gradlew buildNative DoubleMonumentForFixedSeedJar
+| 文件 | 作用 |
+| --- | --- |
+| `monument_search.h` | `DoubleProgress`、`DoublePairHit`、`DoubleMonumentConfig`、`runDoubleMonumentSearch` |
+| `monument_search.cpp` | 配对/扫描逻辑（算法未改） |
+| `monument_search_core.h` / `.c` | cubiomes 封装：神殿位置、深海可行性、海温分类（`dm_*`） |
+| `Thread.h` | `DoubleResults` / `DoublePool` |
+| `test/selftest.cpp` | 可选命令行自测，用于与旧版结果对比（默认不编译） |
+| `CMakeLists.txt` | 只把内核编译成 `double_monument_core` 静态库 |
+
+---
+
+## 接口
+
+AIO 的 `native/double_monument_host.cpp` 按下面的方式调用（节选）：
+
+```cpp
+#include "monument_search.h"
+
+DoubleMonumentConfig cfg;
+cfg.seed = seed;
+cfg.mc = MC_26_3;            // AIO 固定 26.3
+cfg.minX = regMinX;          // region 坐标（方块 / 512）
+cfg.maxX = regMaxX;          // 开区间
+cfg.minZ = regMinZ;
+cfg.maxZ = regMaxZ;
+cfg.pauseOnPairFound = false; // AIO 不使用「找到即暂停」
+
+DoubleProgress progress;
+DoubleResults<DoublePairHit> results;
+runDoubleMonumentSearch(cfg, &progress, results, threads);
+
+auto hits = results.getAllResults(); // 字段：hangX, hangZ, dx, dz, lowEfficiency
 ```
 
-Output / 输出：`build/libs/DoubleMonumentForFixedSeed-2.0.jar`
+要点：
 
-On Windows with MSYS2, ensure `C:\msys64\ucrt64\bin` (or `mingw64\bin`) is on `PATH` when running Gradle.
+- `runDoubleMonumentSearch` 在调用线程同步执行，返回时结果已写完；
+- 暂停/停止沿用 `DoubleProgress::try_pause` / `try_stop` 原子量；
+- `DoubleResults` 不设上限，AIO 收集后统一排序并截断前 1000；
+- `lowEfficiency = 1` 表示该二联可用但效率会略微损失，AIO 会把它排到最后；
+- `hangX/hangZ` 是两殿中点；`dm_monument_classify_ocean_type(_g)` 返回
+  `0=others / 1=cold / 2=frozen`。
 
-Windows + MSYS2 环境下，运行 Gradle 前请将 `C:\msys64\ucrt64\bin`（或 `mingw64\bin`）加入 `PATH`。
+### 符号约定
+
+| 旧 | 新 |
+| --- | --- |
+| `Progress` | `DoubleProgress` |
+| `PairHit` | `DoublePairHit` |
+| `MonumentSearchConfig` | `DoubleMonumentConfig` |
+| `runMonumentSearch` | `runDoubleMonumentSearch` |
+| `ThreadSafeResults` | `DoubleResults` |
+| `ThreadPool` | `DoublePool` |
+| `MonumentGenerator` | `DmMonumentGenerator` |
+| `monument_*`（9 个 C API） | `dm_monument_*` |
+
+`Thread.h` 的 include guard 是 `AIO_DOUBLE_MONUMENT_THREAD_H`，多联的
+`MONUMENT_FINDER_THREAD_H` 不会再冲突。
 
 ---
 
-## Run / 运行
+## 独立编译
 
-```bash
-java -jar build/libs/DoubleMonumentForFixedSeed-2.0.jar
+本仓库不再自带 cubiomes，需要指向 AIO 的 `tools/cubiomes`（或任意同版本
+cubiomes 检出）：
+
+```powershell
+cmake -S . -B build `
+  -DDOUBLE_MONUMENT_CUBIOMES_DIR="..\All-In-One\All-In-One Finder\tools\cubiomes" `
+  -DDOUBLE_MONUMENT_BUILD_SELFTEST=ON
+cmake --build build -j
 ```
 
-Or use `run.bat` after building.  
-或构建后使用 `run.bat`。
+产物：
 
-The JAR embeds native libraries under `/native/{windows|linux|macos}/`. You can also run with:
+- `build/libdouble_monument_core.a`（Windows 下为 `.a`）
+- `build/double_monument_selftest.exe`（仅当开启自测）
 
-JAR 内嵌原生库，路径为 `/native/{windows|linux|macos}/`。也可指定库路径运行：
+也可以直接编译（include 路径按实际目录调整）：
 
-```bash
-java -Djava.library.path=build/native -jar build/libs/DoubleMonumentForFixedSeed-2.0.jar
+```powershell
+g++ -std=c++20 -O3 -c monument_search.cpp -I. -I..\tools
+gcc -std=c11   -O3 -c monument_search_core.c -I. -I..\tools
 ```
 
----
+注意 `-I` 指向 cubiomes 的**父目录**，因为源文件使用 `cubiomes/...` 形式包含头文件。
 
-## JNI smoke test / JNI 冒烟测试
+### 自测
 
-```bash
-./gradlew buildNative compileTestJava
-java -Djava.library.path=build/native -cp "build/classes/java/main;build/classes/java/test" project.MonumentNativeSmokeTest
+```powershell
+build\double_monument_selftest.exe 7 -48 48 -48 48 8
 ```
 
----
-
-## How to Use / 使用方法
-
-### Common controls / 通用按钮
-
-| 中文 | English | Description / 说明 |
-|------|---------|-------------------|
-| **开始搜索** | **Start Search** | Start search / 开始搜索 |
-| **暂停** | **Pause** | Pause search / 暂停搜索 |
-| **继续** | **Resume** | Resume paused search / 继续已暂停的搜索 |
-| **停止** | **Stop** | Stop search / 停止搜索 |
-| **重置搜索区域** | **Reset Search Area** | Reset MinX/MaxX/MinZ/MaxZ to defaults / 将区域坐标恢复为默认值 |
-| **导出** | **Export** | Export single-seed results / 导出单种子搜索结果 |
-| **排序** | **Sort** | Sort results by distance to origin / 按到原点距离排序 |
-| **选择文件** | **Select File** | Import seed list (batch tab) / 导入种子列表（批量 Tab） |
-| **导出完整结果** | **Export Full Results** | Export full batch output / 导出批量完整结果 |
-| **导出种子列表** | **Export Seed List** | Export seeds that had hits / 导出有结果的种子列表 |
-
-Click **开始搜索 / Start Search** to start, **暂停 / Pause** to pause, **停止 / Stop** to stop.
-
-点击 **开始搜索 / Start Search** 开始，**暂停 / Pause** 暂停，**停止 / Stop** 停止。
-
-Default thread count is the number of CPU cores (capped at runtime). If you enter more threads than CPU cores, a confirmation dialog offers to adjust automatically.
-
-默认线程数为 CPU 核数（运行时会 clamp）。若输入超过 CPU 核数，会弹出确认框询问是否自动调整。
+参数：`seed minX maxX minZ maxZ [threads] [mc]`，区域坐标单位是 512 方块。
+输出按坐标排序，便于和改造前构建逐行 diff。
 
 ---
 
-### Tab 1: Single seed search / 单种子搜索
+## 与 All-In-One Finder 集成
 
-| Field / 字段 | 中文 | English |
-|--------------|------|---------|
-| Seed | **种子** | **Seed** |
-| Threads | **线程数** | **Thread Count** |
-| Version | **版本** | **Version** |
-| Region | **MinX / MaxX / MinZ / MaxZ (×512)** | same |
-| Language | **语言** (Chinese / English) | **Language** |
-| Option | **找到符合条件的二联时立即暂停** | **Pause immediately when a valid pair is found** |
-
-- Results format / 结果格式：`/tp x 50 z (dx=?, dz=? / dx=?, dz=?)`  
-  Low-efficiency pairs append / 低效配对后缀：` - 效率会略微损失 / - slightly reduced efficiency`
-
----
-
-### Tab 2: Batch seed search / 批量种子搜索
-
-Import a text file (one seed per line), configure region and thread count, then click **开始搜索 / Start Search**. The tool searches each seed in order and prints seeds with at least one valid pair.
-
-导入文本文件（每行一个种子），设置区域与线程数后点击 **开始搜索 / Start Search**。程序按顺序搜索每个种子，并输出存在有效二联的种子及其结果。
-
----
-
-## Project layout / 项目结构
-
-| Path | Description / 说明 |
-|------|-------------------|
-| `src/main/java/project/` | Swing UI (`DoubleMonumentForFixedSeed`), JNI bridge (`MonumentFinderBridge`), runner (`MonumentSearchRunner`) / 界面、JNI 桥接、搜索编排 |
-| `src/main/resources/messages_*.properties` | UI i18n strings (zh_CN / en_US) / 界面国际化文案 |
-| `monument_search.cpp` / `monument_search_core.c` | C++ search and cubiomes calls / C++ 搜索与 cubiomes 调用 |
-| `jni/` | JNI glue and CMake target `monumentFinderLibJ` |
-| `cubiomes/` | git submodule ([xpple/cubiomes](https://github.com/xpple/cubiomes)) |
+- AIO 的 `native/CMakeLists.txt` 直接编译 `monument_search.cpp` 和
+  `monument_search_core.c`，并使用 AIO 自己的 `tools/cubiomes`；
+- `native/double_monument_host.cpp` 只需包含本仓库的 `monument_search.h`；
+  该头文件已经包含 `Thread.h` 和 `monument_search_core.h`，因此
+  `DoubleResults`、`DmMonumentGenerator` 和 `dm_*` 都有完整声明；
+- AIO 侧把 `AIO_DOUBLE_MONUMENT_REFACTORED` 切到 `1` 后，原先的宏兼容层
+  可以删除；
+- 本分支不再需要单独的 cubiomes 子模块，AIO 父仓的 submodule 指针指到
+  本分支的提交即可。
