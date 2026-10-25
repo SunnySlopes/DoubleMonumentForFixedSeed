@@ -25,16 +25,17 @@ public final class MonumentFinderBridge {
     /** MC_1_21_1 alias */
     public static final int MC_1_21 = MC_1_21_1;
     public static final int MC_26_1 = 33;
-    /** cubiomes' newest profile; 26.3+ reuses it because worldgen is unchanged after 26.2 */
     public static final int MC_26_2 = 34;
+    /** cubiomes' newest profile; 26.3+ uses this generator. */
+    public static final int MC_26_3 = 35;
 
     /**
-     * Labels shown in the version pickers. {@code 26.2+} means "26.2 and later" (26.3, ...),
-     * which share the same generator profile as 26.2.
+     * The UI exposes a single supported version range. Ocean monument positions
+     * and deep-ocean viability are shared across this range, so searches always
+     * use the newest generator (26.3).
      */
-    public static final String[] SUPPORTED_VERSION_LABELS = {
-            "26.2+", "26.1", "1.21.1", "1.20.1", "1.19.2", "1.18.2"
-    };
+    public static final String VERSION_LABEL = "1.18~26.3+";
+    public static final String[] SUPPORTED_VERSION_LABELS = { VERSION_LABEL };
 
     /** ints per result: x, z, x2, z2, singleX, singleZ, dx, dz, count, area, singleArea, areaMax, areaMaxX, areaMaxZ, dual */
     public static final int PAIR_STRIDE = 15;
@@ -128,21 +129,10 @@ public final class MonumentFinderBridge {
     }
 
     /**
-     * Maps a picker label to the cubiomes generator constant. {@code 26.2+} (and any explicit
-     * 26.3 label) resolve to {@link #MC_26_2}, the newest profile; unknown labels fall back to it
-     * so a stale saved preference can never break a search.
+     * The UI only exposes {@link #VERSION_LABEL}; every search uses MC 26.3.
      */
     public static int mcFromVersionString(String versionString) {
-        if (versionString == null) return MC_26_2;
-        return switch (versionString) {
-            case "1.18.2" -> MC_1_18;
-            case "1.19.2" -> MC_1_19;
-            case "1.20.1" -> MC_1_20;
-            case "1.21.1" -> MC_1_21_1;
-            case "26.1" -> MC_26_1;
-            case "26.2", "26.2+", "26.3", "26.3+" -> MC_26_2;
-            default -> MC_26_2;
-        };
+        return MC_26_3;
     }
 
     /** 3/4-group search modes as a bitmask; any combination may be enabled at once. */

@@ -178,12 +178,6 @@ tasks.register('prepareNativeResources') {
             }
             copy {
                 from(buildNativeDir)
-                include('libmonumentFinderLibJ.dll')
-                into(new File(outDir, 'native/windows'))
-                rename { 'monumentFinderLibJ.dll' }
-            }
-            copy {
-                from(buildNativeDir)
                 include('*.so', '**/*.so')
                 into(new File(outDir, 'native/linux'))
             }

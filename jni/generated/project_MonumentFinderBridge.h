@@ -21,6 +21,8 @@ extern "C" {
 #define project_MonumentFinderBridge_MC_26_1 33L
 #undef project_MonumentFinderBridge_MC_26_2
 #define project_MonumentFinderBridge_MC_26_2 34L
+#undef project_MonumentFinderBridge_MC_26_3
+#define project_MonumentFinderBridge_MC_26_3 35L
 #undef project_MonumentFinderBridge_PAIR_STRIDE
 #define project_MonumentFinderBridge_PAIR_STRIDE 15L
 #undef project_MonumentFinderBridge_SEARCH_SINGLE

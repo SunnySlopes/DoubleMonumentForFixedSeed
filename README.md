@@ -1,9 +1,9 @@
 # Multi Monument Finder
 # 固定种子多连海底神殿搜索工具
 
-A GUI program for searching **double / triple / quadruple ocean monuments** in Minecraft Java Edition fixed seeds. Supports Minecraft Java Edition **1.18.2** through **26.3+** (the version picker labels the newest profile **26.2+**, i.e. 26.2 and later — 26.3+ uses the same worldgen).
+A GUI program for searching **double / triple / quadruple ocean monuments** in Minecraft Java Edition fixed seeds. Supports Minecraft Java Edition **1.18~26.3+**. All searches use the newest **26.3** generator, because monument placement and deep-ocean viability are shared across this range.
 
-用于在 Minecraft Java 版固定种子中搜索**二连 / 三连 / 四连海底神殿**的图形界面工具。支持 **1.18.2** 至 **26.3+**（版本下拉里最新档位标为 **26.2+**，表示 26.2 及以后；26.3+ 的世界生成与 26.2 相同）。
+用于在 Minecraft Java 版固定种子中搜索**二连 / 三连 / 四连海底神殿**的图形界面工具。支持 **1.18~26.3+**。所有搜索均使用最新的 **26.3** 生成器，因为该版本区间内海底神殿位置与深海群系可行性一致。
 
 Search uses **cubiomes** via a native library (JNI): monument positions and **deep-ocean biome viability** (`isViableStructurePos` for monuments). Results may differ from older versions that used custom climate noise thresholds.
 
@@ -97,6 +97,10 @@ Default thread count is the number of CPU cores (capped at runtime). If you ente
 
 默认线程数为 CPU 核数（运行时会 clamp）。若输入超过 CPU 核数，会弹出确认框询问是否自动调整。
 
+The search area is measured in regions: `(MaxX - MinX) × (MaxZ - MinZ)`. If the area exceeds **1024×1024 regions**, a warning dialog is shown and the search is not started.
+
+搜索区域按 region 计算面积：`(MaxX - MinX) × (MaxZ - MinZ)`。面积超过 **1024×1024 个 region** 时会弹出提示并拒绝开始搜索。
+
 ---
 
 ### Tab 1: Single seed search / 单种子搜索
@@ -105,14 +109,25 @@ Default thread count is the number of CPU cores (capped at runtime). If you ente
 |------------|------------------------------------- -----|--------------------------------------------------|
 | Seed       | **种子**                                   | **Seed**                                         |
 | Threads    | **线程数**                                  | **Thread Count**                                 |
-| Version    | **版本** (26.2+ = 26.2 及以后，含 26.3+)        | **Version** (26.2+ = 26.2 and later, incl. 26.3+) |
+| Version    | **版本** (1.18~26.3+，仅一个选项)              | **Version** (1.18~26.3+, single option)          |
 | Pair Level | **相邻神殿数** (2 / 3 / 4)                    | **Pair Level**                                   |
 | Min Area   | **最小可用面积（可选）** + 面积类型下拉（单人/双人/单门最小面积） | **Min usable area (optional)** + area type (single / dual / gate) |
 | Search mode| **搜索单假人 / 搜索双假人 / 搜索单门**（可多选：决定计算哪些面积，仅 3/4 连） | **Single dummy / Dual dummy / Single gate** (multi-select: which areas to compute, 3/4 only) |
 | Region     | **MinX / MaxX / MinZ / MaxZ (×512)**     | same                                             |
+| Square side| **正方形区域边长**（默认 256，勾选）                   | **Square side length** (default 256, checked)    |
 | Language   | **语言** (Chinese / English)               | **Language** (Chinese / English)                 |
 | Option     | **找到符合条件的多连时立即暂停**                       | **Pause immediately when a valid pair is found** |
 | Option     | **群系检查**                                 | **Biome check**                                  |
+
+- Coordinate hints show the block coordinate/length (`region × 512`) next to each input.
+- 坐标换算：每个 MinX/MaxX/MinZ/MaxZ 和正方形边长输入框右侧会实时显示 ×512 后的方块坐标/长度。
+- Square mode fills Min/Max centered at `(0,0)` and disables manual Min/Max editing while checked; uncheck it to type Min/Max by hand.
+- 正方形选区：勾选后以 `(0,0)` 为中心自动填入 Min/Max，并禁用 Min/Max 手动输入；取消勾选后可手动输入。
+- Single-seed and batch square sides both default to **256** regions, centered at `(0,0)`.
+- 单种子和批量页的正方形边长都默认 **256** 个 region，以 `(0,0)` 为中心。
+
+- Only one version option is available: **1.18~26.3+**. Searches use the **26.3** generator.
+- 只有一个版本选项：**1.18~26.3+**，搜索使用 **26.3** 生成器。
 
 - Result format / 结果格式：the results panel is a **table** whose column header stays pinned while you scroll; **drag a header to reorder the columns** and use **列… / Columns…** to show/hide them. One row per hit, nine columns by default in this order — `单假人最优坐标 / 单假人最优面积 / 海洋群系类型 / 相邻神殿数 / 假人1坐标 / 假人2坐标 / 双假人最优面积 / 单门面积上限 / 单门地狱门坐标`. Points are plain `x z` numbers (no `/tp`, no `x 50 z`), the level is a bare number (no brackets), and there are no `面积=`-style labels - the header names the columns. Cells that do not apply (single-point mode has no second dummy; biome check off has no ocean type) show `-`. The batch tab prefixes a `种子 / Seed` column. The **列… / Columns…** picker sets what the table shows, and the text/CSV exports follow it (including the dragged order); its "Include header row in CSV" option applies to CSV only. Select rows and press **Ctrl+C** to copy them as tab-separated text (the column header is prepended); right-click for Copy all / Select all.  
   结果面板是一个**表格**：列头固定，滚动时始终可见；每命中一条占一行，固定 9 列并按下述顺序排列——`单假人最优坐标 / 单假人最优面积 / 海洋群系类型 / 相邻神殿数 / 假人1坐标 / 假人2坐标 / 双假人最优面积 / 单门面积上限 / 单门地狱门坐标`。坐标只写 `x z`（不带 `/tp`、不带 `x 50 z`），连数是纯数字（不带括号），也没有 `面积=` 之类的前缀——列名由表头给出。不适用的格子（单点模式没有第二假人、未开群系检查没有海洋类型）显示 `-`。批量页在最前面多一列 `种子`。**列…** 按钮选择显示哪些列，TXT/CSV 导出与之一致（连拖动后的顺序也一致）；其中的“CSV 包含表头行”只影响 CSV。选中行按 **Ctrl+C** 复制（会自动带上列头），右键菜单提供“复制全部 / 全选”。
@@ -133,7 +148,7 @@ Default thread count is the number of CPU cores (capped at runtime). If you ente
 
 ### Tab 2: Batch seed search / 批量种子搜索
 
-Import a text file (one seed per line), configure region and thread count, then click **开始搜索 / Start Search**. The tool searches each seed in order and prints seeds with at least one valid pair.
+Import a text file (one seed per line), configure region and thread count, then click **开始搜索 / Start Search**. The tool searches each seed in order and prints seeds with at least one valid group.
 
 导入文本文件（每行一个种子），设置区域与线程数后点击 **开始搜索 / Start Search**。程序按顺序搜索每个种子，并输出存在有效多连的种子及其结果。
 

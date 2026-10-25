@@ -47,6 +47,14 @@ static int classify_ocean_point(const BiomeNoise *bn, int blockX, int blockZ)
     return OCEAN_MASK_WARM;
 }
 
+/** Floor-division mapping from block coordinate to the containing 512-block region. */
+static int block_to_region(int block)
+{
+    if (block >= 0)
+        return block / 512;
+    return (int) -((-(int64_t) block + 511) / 512);
+}
+
 struct MonumentGenerator {
     Generator gen;
 };
@@ -142,8 +150,10 @@ int monument_exists_at_block_g(
     int *outBlockX,
     int *outBlockZ)
 {
-    int regionX = targetX / 512;
-    int regionZ = targetZ / 512;
+    /* Must floor, not truncate: C division rounds negative coordinates toward zero,
+       which would map e.g. -65552 into region -128 instead of region -129. */
+    int regionX = block_to_region(targetX);
+    int regionZ = block_to_region(targetZ);
     int blockX = 0;
     int blockZ = 0;
 

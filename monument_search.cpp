@@ -55,6 +55,10 @@ PairCheckResult checkCanFormPair(const MonumentPos &pos1, const MonumentPos &pos
     int dx = std::abs(pos2.x - pos1.x);
     int dz = std::abs(pos2.z - pos1.z);
 
+    // A monument cannot be paired with itself.
+    if (dx == 0 && dz == 0)
+        return {false, false};
+
     if (dx % 16 != 0 || dz % 16 != 0)
         return {false, false};
 
@@ -111,6 +115,16 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
     // Skip expensive work once the result queue is full (geometry-only searches produce astronomically many candidates)
     if (ctx.out->full())
         return;
+
+    // A monument cannot be paired with itself. Groups are built from distinct region cells,
+    // but a degenerate duplicate would still emit a bogus dx=0, dz=0 hit; reject it here as
+    // the counterpart of the self-pair guard in checkCanFormPair().
+    for (int i = 0; i < nn; i++) {
+        for (int j = i + 1; j < nn; j++) {
+            if (pts[i].x == pts[j].x && pts[i].z == pts[j].z)
+                return;
+        }
+    }
 
     const int modes = ctx.cfg.searchModes;   // which areas to compute
     const int filterMode = ctx.cfg.filterMode; // which area the threshold applies to
