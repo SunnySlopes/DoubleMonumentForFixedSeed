@@ -13,11 +13,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private static final int DEFAULT_MAX_X = 128;
     private static final int DEFAULT_MIN_Z = -128;
     private static final int DEFAULT_MAX_Z = 128;
-    // 第二个tab的默认值（16x16的范围）
+    // 第二个tab的手动输入默认值（16x16的范围；正方形模式另用 DEFAULT_SQUARE_SIDE）
     private static final int BATCH_DEFAULT_MIN_X = -16;
     private static final int BATCH_DEFAULT_MAX_X = 16;
     private static final int BATCH_DEFAULT_MIN_Z = -16;
     private static final int BATCH_DEFAULT_MAX_Z = 16;
+    /** region 坐标 ×512 = 方块坐标 */
+    private static final int REGION_TO_BLOCKS = 512;
+    /** 正方形区域默认边长（单位：region），单种子和批量一致 */
+    private static final int DEFAULT_SQUARE_SIDE = 256;
+    private static final int BATCH_DEFAULT_SQUARE_SIDE = DEFAULT_SQUARE_SIDE;
     private static final int DEFAULT_THREAD_COUNT = Runtime.getRuntime().availableProcessors();
 
     private JTabbedPane tabbedPane;
@@ -31,6 +36,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JLabel searchMaxZLabel;
     private JLabel searchLanguageLabel;
     private JLabel searchCreditLabel;
+    private JLabel minXBlocksHintLabel;
+    private JLabel maxXBlocksHintLabel;
+    private JLabel minZBlocksHintLabel;
+    private JLabel maxZBlocksHintLabel;
+    private JLabel squareSideBlocksHintLabel;
     private JPanel searchRightPanel;
     private JLabel batchSeedFileTitleLabel;
     private JLabel batchThreadCountLabel;
@@ -40,6 +50,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JLabel batchMinZLabel;
     private JLabel batchMaxZLabel;
     private JLabel batchCreditLabel;
+    private JLabel batchMinXBlocksHintLabel;
+    private JLabel batchMaxXBlocksHintLabel;
+    private JLabel batchMinZBlocksHintLabel;
+    private JLabel batchMaxZBlocksHintLabel;
+    private JLabel batchSquareSideBlocksHintLabel;
     private JPanel batchRightPanel;
 
     private JTextField searchSeedField;
@@ -52,6 +67,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JTextField maxXField;
     private JTextField minZField;
     private JTextField maxZField;
+    private JCheckBox squareSideCheckBox;
+    private JTextField squareSideField;
+    private boolean squareSideUpdating = false;
     private JButton searchStartButton;
     private JButton searchPauseButton;
     private JButton searchStopButton;
@@ -72,7 +90,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private int lastSearchMaxZ = 0;
     private int lastSearchThreadCount = 0;
     private long formatContextSeed = 0;
-    private int formatContextMc = MonumentFinderBridge.MC_26_2;
+    private int formatContextMc = MonumentFinderBridge.MC_26_3;
     
     // 第二个tab的组件
     private JButton batchImportButton;
@@ -83,6 +101,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JTextField batchMaxXField;
     private JTextField batchMinZField;
     private JTextField batchMaxZField;
+    private JCheckBox batchSquareSideCheckBox;
+    private JTextField batchSquareSideField;
+    private boolean batchSquareSideUpdating = false;
     private JButton batchStartButton;
     private JButton batchPauseButton;
     private JButton batchStopButton;
@@ -224,7 +245,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.weightx = 1.0;
         String[] versionOptions = MonumentFinderBridge.SUPPORTED_VERSION_LABELS;
         versionComboBox = new JComboBox<>(versionOptions);
-        versionComboBox.setSelectedIndex(0); // 默认选择 26.2
+        versionComboBox.setSelectedIndex(0); // 只有一个版本：1.18~26.3+
         inputPanel.add(versionComboBox, gbc);
 
         // MinX 输入
@@ -245,6 +266,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             }
         });
         inputPanel.add(minXField, gbc);
+        gbc.gridx = 2;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
+        minXBlocksHintLabel = createBlocksHintLabel(minXField);
+        inputPanel.add(minXBlocksHintLabel, gbc);
 
         // MaxX 输入
         gbc.gridx = 0;
@@ -264,6 +290,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             }
         });
         inputPanel.add(maxXField, gbc);
+        gbc.gridx = 2;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
+        maxXBlocksHintLabel = createBlocksHintLabel(maxXField);
+        inputPanel.add(maxXBlocksHintLabel, gbc);
 
         // MinZ 输入
         gbc.gridx = 0;
@@ -283,6 +314,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             }
         });
         inputPanel.add(minZField, gbc);
+        gbc.gridx = 2;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
+        minZBlocksHintLabel = createBlocksHintLabel(minZField);
+        inputPanel.add(minZBlocksHintLabel, gbc);
 
         // MaxZ 输入
         gbc.gridx = 0;
@@ -302,10 +338,57 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             }
         });
         inputPanel.add(maxZField, gbc);
+        gbc.gridx = 2;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
+        maxZBlocksHintLabel = createBlocksHintLabel(maxZField);
+        inputPanel.add(maxZBlocksHintLabel, gbc);
+
+        // 正方形区域边长（勾选后按中心 0,0 填入 min/max）
+        gbc.gridx = 0;
+        gbc.gridy = 7;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
+        gbc.gridwidth = 1;
+        squareSideCheckBox = new JCheckBox(getString("label.squareSide"));
+        squareSideCheckBox.setFont(getLoadedFont());
+        squareSideCheckBox.setSelected(true);
+        squareSideCheckBox.addActionListener(e -> onSquareSideModeToggled());
+        inputPanel.add(squareSideCheckBox, gbc);
+        gbc.gridx = 1;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+        squareSideField = new JTextField(String.valueOf(DEFAULT_SQUARE_SIDE), 20);
+        squareSideField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                applySquareSideToBounds();
+            }
+
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                applySquareSideToBounds();
+            }
+
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                applySquareSideToBounds();
+            }
+        });
+        squareSideField.addFocusListener(new java.awt.event.FocusAdapter() {
+            public void focusLost(java.awt.event.FocusEvent e) {
+                validateIntegerInput(squareSideField, getString("label.squareSide"));
+            }
+        });
+        inputPanel.add(squareSideField, gbc);
+        gbc.gridx = 2;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
+        squareSideBlocksHintLabel = createBlocksHintLabel(squareSideField);
+        inputPanel.add(squareSideBlocksHintLabel, gbc);
+        applyBoundFieldEnableState(true);
+        applySquareSideToBounds();
 
         // 语言选择
         gbc.gridx = 0;
-        gbc.gridy = 7;
+        gbc.gridy = 8;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
         gbc.gridwidth = 1;
@@ -327,7 +410,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
 
         // 找到二联时立即暂停选项
         gbc.gridx = 0;
-        gbc.gridy = 8;
+        gbc.gridy = 9;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
         gbc.gridwidth = 2;
@@ -338,7 +421,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
 
         // 群系检查选项
         gbc.gridx = 0;
-        gbc.gridy = 9;
+        gbc.gridy = 10;
         gbc.gridwidth = 2;
         biomeCheckCheckBox = new JCheckBox(getString("check.biomeCheck"));
         biomeCheckCheckBox.setFont(getLoadedFont());
@@ -519,10 +602,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         if (biomeCheckCheckBox != null) {
             biomeCheckCheckBox.setEnabled(true);
         }
-                minXField.setEnabled(true);
-                maxXField.setEnabled(true);
-                minZField.setEnabled(true);
-                maxZField.setEnabled(true);
+                applyBoundFieldEnableState(true);
                 if (languageComboBox != null) {
                     languageComboBox.setEnabled(true);
                 }
@@ -555,7 +635,199 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         }
     }
     
-    
+    /** 将 region 输入换算为“ = 65,536方块”提示文案 */
+    private String formatBlocksHint(String regionText) {
+        try {
+            long region = Long.parseLong(regionText.trim());
+            long blocks = region * REGION_TO_BLOCKS;
+            return getString("hint.blocks", String.format(java.util.Locale.US, "%,d", blocks));
+        } catch (NumberFormatException e) {
+            return "";
+        }
+    }
+
+    private void updateBlocksHint(JTextField field, JLabel hintLabel) {
+        if (field == null || hintLabel == null) {
+            return;
+        }
+        hintLabel.setText(formatBlocksHint(field.getText()));
+    }
+
+    /** 创建 region → 方块坐标提示标签，并跟随输入实时更新 */
+    private JLabel createBlocksHintLabel(JTextField field) {
+        JLabel hintLabel = new JLabel();
+        hintLabel.setFont(getLoadedFont());
+        updateBlocksHint(field, hintLabel);
+        field.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                updateBlocksHint(field, hintLabel);
+            }
+
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                updateBlocksHint(field, hintLabel);
+            }
+
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                updateBlocksHint(field, hintLabel);
+            }
+        });
+        return hintLabel;
+    }
+
+    private void onSquareSideModeToggled() {
+        applyBoundFieldEnableState(!isSearchRunning);
+        if (squareSideCheckBox != null && squareSideCheckBox.isSelected()) {
+            applySquareSideToBounds();
+        }
+    }
+
+    /** 正方形模式下禁用 Min/Max 输入框，手动模式下禁用边长输入框 */
+    private void applyBoundFieldEnableState(boolean allowEdit) {
+        boolean squareMode = squareSideCheckBox != null && squareSideCheckBox.isSelected();
+        if (squareSideCheckBox != null) {
+            squareSideCheckBox.setEnabled(allowEdit);
+        }
+        if (squareSideField != null) {
+            squareSideField.setEnabled(allowEdit && squareMode);
+        }
+        boolean boundsEditable = allowEdit && !squareMode;
+        if (minXField != null) {
+            minXField.setEnabled(boundsEditable);
+        }
+        if (maxXField != null) {
+            maxXField.setEnabled(boundsEditable);
+        }
+        if (minZField != null) {
+            minZField.setEnabled(boundsEditable);
+        }
+        if (maxZField != null) {
+            maxZField.setEnabled(boundsEditable);
+        }
+    }
+
+    /**
+     * 按正方形边长（单位 region）以 (0,0) 为中心填充 Min/Max。
+     * 本项目的 Max 是排他上界，因此 Max = Min + Side。
+     */
+    private void applySquareSideToBounds() {
+        if (squareSideUpdating || squareSideCheckBox == null || !squareSideCheckBox.isSelected()) {
+            return;
+        }
+        if (squareSideField == null || minXField == null) {
+            return;
+        }
+        String text = squareSideField.getText().trim();
+        if (text.isEmpty()) {
+            return;
+        }
+        try {
+            long side = Long.parseLong(text);
+            if (side < 1) {
+                return;
+            }
+            long min = -side / 2;
+            long max = min + side;
+            if (min < Integer.MIN_VALUE || max > Integer.MAX_VALUE) {
+                return;
+            }
+            squareSideUpdating = true;
+            minXField.setText(String.valueOf((int) min));
+            maxXField.setText(String.valueOf((int) max));
+            minZField.setText(String.valueOf((int) min));
+            maxZField.setText(String.valueOf((int) max));
+            squareSideUpdating = false;
+            checkSearchParameterChange();
+        } catch (NumberFormatException ignored) {
+            // 等待输入完整整数
+        }
+    }
+
+    private void onBatchSquareSideModeToggled() {
+        applyBatchBoundFieldEnableState(!isBatchSearchRunning);
+        if (batchSquareSideCheckBox != null && batchSquareSideCheckBox.isSelected()) {
+            applyBatchSquareSideToBounds();
+        }
+    }
+
+    private void applyBatchBoundFieldEnableState(boolean allowEdit) {
+        boolean squareMode = batchSquareSideCheckBox != null && batchSquareSideCheckBox.isSelected();
+        if (batchSquareSideCheckBox != null) {
+            batchSquareSideCheckBox.setEnabled(allowEdit);
+        }
+        if (batchSquareSideField != null) {
+            batchSquareSideField.setEnabled(allowEdit && squareMode);
+        }
+        boolean boundsEditable = allowEdit && !squareMode;
+        if (batchMinXField != null) {
+            batchMinXField.setEnabled(boundsEditable);
+        }
+        if (batchMaxXField != null) {
+            batchMaxXField.setEnabled(boundsEditable);
+        }
+        if (batchMinZField != null) {
+            batchMinZField.setEnabled(boundsEditable);
+        }
+        if (batchMaxZField != null) {
+            batchMaxZField.setEnabled(boundsEditable);
+        }
+    }
+
+    private void applyBatchSquareSideToBounds() {
+        if (batchSquareSideUpdating || batchSquareSideCheckBox == null
+                || !batchSquareSideCheckBox.isSelected()) {
+            return;
+        }
+        if (batchSquareSideField == null || batchMinXField == null) {
+            return;
+        }
+        String text = batchSquareSideField.getText().trim();
+        if (text.isEmpty()) {
+            return;
+        }
+        try {
+            long side = Long.parseLong(text);
+            if (side < 1) {
+                return;
+            }
+            long min = -side / 2;
+            long max = min + side;
+            if (min < Integer.MIN_VALUE || max > Integer.MAX_VALUE) {
+                return;
+            }
+            batchSquareSideUpdating = true;
+            batchMinXField.setText(String.valueOf((int) min));
+            batchMaxXField.setText(String.valueOf((int) max));
+            batchMinZField.setText(String.valueOf((int) min));
+            batchMaxZField.setText(String.valueOf((int) max));
+            batchSquareSideUpdating = false;
+        } catch (NumberFormatException ignored) {
+            // 等待输入完整整数
+        }
+    }
+
+    /**
+     * 检查搜索区域的 region 面积是否在允许范围内。
+     * 面积 = (MaxX - MinX) * (MaxZ - MinZ)，超过 1024×1024 时弹出提示并拒绝搜索。
+     *
+     * @return true 表示面积合法，可以继续搜索
+     */
+    private boolean validateSearchArea(int minX, int maxX, int minZ, int maxZ) {
+        long width = (long) maxX - minX;
+        long height = (long) maxZ - minZ;
+        long limit = MonumentSearchRunner.MAX_SEARCH_REGION_AREA;
+        // Check each dimension first so the multiplication below cannot overflow.
+        boolean tooLarge = width > limit || height > limit || width * height > limit;
+        if (tooLarge) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    getString("error.searchAreaTooLarge"),
+                    getString("prompt.error"),
+                    JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+        return true;
+    }
+
     // 排序搜索结果（按神殿中心点到坐标原点(0,0)的直线距离从近到远）
     private void sortSearchResults() {
         String text = searchResultArea.getText().trim();
@@ -650,7 +922,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     // 获取其他参数
                     String selectedVersion = (String) versionComboBox.getSelectedItem();
                     int mc = MonumentFinderBridge.mcFromVersionString(
-                            selectedVersion != null ? selectedVersion : "26.2");
+                            selectedVersion != null ? selectedVersion : MonumentFinderBridge.VERSION_LABEL);
 
                     if (searcher == null || searcher.getMc() != mc) {
                         searcher = new MonumentSearchRunner(mc);
@@ -832,20 +1104,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 return;
             }
             
-            // 检查世界边界：minX < -58594, maxX > 58593, minZ < -58594, maxZ > 58593
-            boolean outOfBounds = minX < DEFAULT_MIN_X || maxX > DEFAULT_MAX_X || minZ < DEFAULT_MIN_Z || maxZ > DEFAULT_MAX_Z;
-
-            if (outOfBounds) {
-                int result = JOptionPane.showConfirmDialog(
-                    this,
-                    getString("error.outOfBounds"),
-                    getString("prompt.warning"),
-                    JOptionPane.YES_NO_OPTION,
-                    JOptionPane.WARNING_MESSAGE
-                );
-                if (result != JOptionPane.YES_OPTION) {
-                    return;
-                }
+            // 搜索区域保护：region 面积过大时拒绝搜索
+            if (!validateSearchArea(minX, maxX, minZ, maxZ)) {
+                return;
             }
 
             // 保存当前参数
@@ -873,10 +1134,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             if (languageComboBox != null) {
                 languageComboBox.setEnabled(false);
             }
-            minXField.setEnabled(false);
-            maxXField.setEnabled(false);
-            minZField.setEnabled(false);
-            maxZField.setEnabled(false);
+            applyBoundFieldEnableState(false);
             searchResultArea.setText("");
             searchProgressBar.setValue(0);
             searchProgressBar.setString(getString("progress.initial"));
@@ -886,7 +1144,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             // 获取选择的版本
             String selectedVersion = (String) versionComboBox.getSelectedItem();
             int mc = MonumentFinderBridge.mcFromVersionString(
-                    selectedVersion != null ? selectedVersion : "26.2");
+                    selectedVersion != null ? selectedVersion : MonumentFinderBridge.VERSION_LABEL);
 
             searcher = new MonumentSearchRunner(mc);
             formatContextSeed = seed;
@@ -938,10 +1196,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         if (biomeCheckCheckBox != null) {
             biomeCheckCheckBox.setEnabled(true);
         }
-        minXField.setEnabled(true);
-        maxXField.setEnabled(true);
-        minZField.setEnabled(true);
-        maxZField.setEnabled(true);
+        applyBoundFieldEnableState(true);
         if (languageComboBox != null) {
             languageComboBox.setEnabled(true);
         }
@@ -949,10 +1204,20 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     }
 
     private void resetSearchToDefaults() {
+        if (squareSideCheckBox != null) {
+            squareSideCheckBox.setSelected(true);
+        }
+        if (squareSideField != null) {
+            squareSideUpdating = true;
+            squareSideField.setText(String.valueOf(DEFAULT_SQUARE_SIDE));
+            squareSideUpdating = false;
+        }
         minXField.setText(String.valueOf(DEFAULT_MIN_X));
         maxXField.setText(String.valueOf(DEFAULT_MAX_X));
         minZField.setText(String.valueOf(DEFAULT_MIN_Z));
         maxZField.setText(String.valueOf(DEFAULT_MAX_Z));
+        applyBoundFieldEnableState(!isSearchRunning);
+        applySquareSideToBounds();
     }
 
     private void updateSearchProgress(MonumentSearchRunner.ProgressInfo info) {
@@ -994,10 +1259,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 if (languageComboBox != null) {
                     languageComboBox.setEnabled(true);
                 }
-                minXField.setEnabled(true);
-                maxXField.setEnabled(true);
-                minZField.setEnabled(true);
-                maxZField.setEnabled(true);
+                applyBoundFieldEnableState(true);
                 searchProgressBar.setString(getString("progress.complete", info.processed, info.total));
                 searchRemainingTimeLabel.setText(getString("remainingTime.completed"));
             }
@@ -1207,7 +1469,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
 
         // 群系检查选项
         gbc.gridx = 0;
-        gbc.gridy = 8;
+        gbc.gridy = 9;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
         gbc.gridwidth = 2;
@@ -1235,6 +1497,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             }
         });
         inputPanel.add(batchMinXField, gbc);
+        gbc.gridx = 2;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
+        batchMinXBlocksHintLabel = createBlocksHintLabel(batchMinXField);
+        inputPanel.add(batchMinXBlocksHintLabel, gbc);
 
         // MaxX 输入
         gbc.gridx = 0;
@@ -1254,6 +1521,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             }
         });
         inputPanel.add(batchMaxXField, gbc);
+        gbc.gridx = 2;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
+        batchMaxXBlocksHintLabel = createBlocksHintLabel(batchMaxXField);
+        inputPanel.add(batchMaxXBlocksHintLabel, gbc);
 
         // MinZ 输入
         gbc.gridx = 0;
@@ -1273,6 +1545,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             }
         });
         inputPanel.add(batchMinZField, gbc);
+        gbc.gridx = 2;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
+        batchMinZBlocksHintLabel = createBlocksHintLabel(batchMinZField);
+        inputPanel.add(batchMinZBlocksHintLabel, gbc);
 
         // MaxZ 输入
         gbc.gridx = 0;
@@ -1292,6 +1569,53 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             }
         });
         inputPanel.add(batchMaxZField, gbc);
+        gbc.gridx = 2;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
+        batchMaxZBlocksHintLabel = createBlocksHintLabel(batchMaxZField);
+        inputPanel.add(batchMaxZBlocksHintLabel, gbc);
+
+        // 正方形区域边长（勾选后按中心 0,0 填入 min/max）
+        gbc.gridx = 0;
+        gbc.gridy = 8;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
+        gbc.gridwidth = 1;
+        batchSquareSideCheckBox = new JCheckBox(getString("label.squareSide"));
+        batchSquareSideCheckBox.setFont(getLoadedFont());
+        batchSquareSideCheckBox.setSelected(true);
+        batchSquareSideCheckBox.addActionListener(e -> onBatchSquareSideModeToggled());
+        inputPanel.add(batchSquareSideCheckBox, gbc);
+        gbc.gridx = 1;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+        batchSquareSideField = new JTextField(String.valueOf(BATCH_DEFAULT_SQUARE_SIDE), 20);
+        batchSquareSideField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                applyBatchSquareSideToBounds();
+            }
+
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                applyBatchSquareSideToBounds();
+            }
+
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                applyBatchSquareSideToBounds();
+            }
+        });
+        batchSquareSideField.addFocusListener(new java.awt.event.FocusAdapter() {
+            public void focusLost(java.awt.event.FocusEvent e) {
+                validateIntegerInput(batchSquareSideField, getString("label.squareSide"));
+            }
+        });
+        inputPanel.add(batchSquareSideField, gbc);
+        gbc.gridx = 2;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0;
+        batchSquareSideBlocksHintLabel = createBlocksHintLabel(batchSquareSideField);
+        inputPanel.add(batchSquareSideBlocksHintLabel, gbc);
+        applyBatchBoundFieldEnableState(true);
+        applyBatchSquareSideToBounds();
 
         // 按钮区域
         JPanel buttonPanel = new JPanel(new FlowLayout());
@@ -1548,11 +1872,16 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 JOptionPane.showMessageDialog(this, getString("error.minZGreaterThanMaxZ"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
             }
-            
+
+            // 搜索区域保护：region 面积过大时拒绝搜索
+            if (!validateSearchArea(minX, maxX, minZ, maxZ)) {
+                return;
+            }
+
             // 获取选择的版本
             String selectedVersion = (String) batchVersionComboBox.getSelectedItem();
             int mc = MonumentFinderBridge.mcFromVersionString(
-                    selectedVersion != null ? selectedVersion : "26.2");
+                    selectedVersion != null ? selectedVersion : MonumentFinderBridge.VERSION_LABEL);
 
             // 创建final副本用于lambda表达式
             final int finalThreadCount = threadCount;
@@ -1572,10 +1901,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             batchImportButton.setEnabled(false);
             batchThreadCountField.setEnabled(false);
             batchVersionComboBox.setEnabled(false);
-            batchMinXField.setEnabled(false);
-            batchMaxXField.setEnabled(false);
-            batchMinZField.setEnabled(false);
-            batchMaxZField.setEnabled(false);
+            applyBatchBoundFieldEnableState(false);
             if (batchBiomeCheckCheckBox != null) {
                 batchBiomeCheckCheckBox.setEnabled(false);
             }
@@ -1758,10 +2084,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     batchImportButton.setEnabled(true);
                     batchThreadCountField.setEnabled(true);
                     batchVersionComboBox.setEnabled(true);
-                    batchMinXField.setEnabled(true);
-                    batchMaxXField.setEnabled(true);
-                    batchMinZField.setEnabled(true);
-                    batchMaxZField.setEnabled(true);
+                    applyBatchBoundFieldEnableState(true);
                     if (batchBiomeCheckCheckBox != null) {
                         batchBiomeCheckCheckBox.setEnabled(true);
                     }
@@ -1782,10 +2105,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             batchImportButton.setEnabled(true);
             batchThreadCountField.setEnabled(true);
             batchVersionComboBox.setEnabled(true);
-            batchMinXField.setEnabled(true);
-            batchMaxXField.setEnabled(true);
-            batchMinZField.setEnabled(true);
-            batchMaxZField.setEnabled(true);
+            applyBatchBoundFieldEnableState(true);
             if (batchBiomeCheckCheckBox != null) {
                 batchBiomeCheckCheckBox.setEnabled(true);
             }
@@ -1840,10 +2160,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         batchImportButton.setEnabled(true);
         batchThreadCountField.setEnabled(true);
         batchVersionComboBox.setEnabled(true);
-        batchMinXField.setEnabled(true);
-        batchMaxXField.setEnabled(true);
-        batchMinZField.setEnabled(true);
-        batchMaxZField.setEnabled(true);
+        applyBatchBoundFieldEnableState(true);
         if (batchBiomeCheckCheckBox != null) {
             batchBiomeCheckCheckBox.setEnabled(true);
         }
@@ -1852,10 +2169,20 @@ public class DoubleMonumentForFixedSeed extends JFrame {
 
     // 重置批量搜索区域
     private void resetBatchSearchToDefaults() {
+        if (batchSquareSideCheckBox != null) {
+            batchSquareSideCheckBox.setSelected(true);
+        }
+        if (batchSquareSideField != null) {
+            batchSquareSideUpdating = true;
+            batchSquareSideField.setText(String.valueOf(BATCH_DEFAULT_SQUARE_SIDE));
+            batchSquareSideUpdating = false;
+        }
         batchMinXField.setText(String.valueOf(BATCH_DEFAULT_MIN_X));
         batchMaxXField.setText(String.valueOf(BATCH_DEFAULT_MAX_X));
         batchMinZField.setText(String.valueOf(BATCH_DEFAULT_MIN_Z));
         batchMaxZField.setText(String.valueOf(BATCH_DEFAULT_MAX_Z));
+        applyBatchBoundFieldEnableState(!isBatchSearchRunning);
+        applyBatchSquareSideToBounds();
     }
 
     // 导出批量搜索结果
@@ -2056,6 +2383,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         if (searchMaxXLabel != null) searchMaxXLabel.setText(getString("label.maxX"));
         if (searchMinZLabel != null) searchMinZLabel.setText(getString("label.minZ"));
         if (searchMaxZLabel != null) searchMaxZLabel.setText(getString("label.maxZ"));
+        if (squareSideCheckBox != null) squareSideCheckBox.setText(getString("label.squareSide"));
+        updateBlocksHint(minXField, minXBlocksHintLabel);
+        updateBlocksHint(maxXField, maxXBlocksHintLabel);
+        updateBlocksHint(minZField, minZBlocksHintLabel);
+        updateBlocksHint(maxZField, maxZBlocksHintLabel);
+        updateBlocksHint(squareSideField, squareSideBlocksHintLabel);
         if (searchLanguageLabel != null) searchLanguageLabel.setText(getString("label.language"));
         if (searchCreditLabel != null) searchCreditLabel.setText(getString("credit.text"));
         if (searchRightPanel != null) {
@@ -2103,6 +2436,12 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         if (batchMaxXLabel != null) batchMaxXLabel.setText(getString("label.maxX"));
         if (batchMinZLabel != null) batchMinZLabel.setText(getString("label.minZ"));
         if (batchMaxZLabel != null) batchMaxZLabel.setText(getString("label.maxZ"));
+        if (batchSquareSideCheckBox != null) batchSquareSideCheckBox.setText(getString("label.squareSide"));
+        updateBlocksHint(batchMinXField, batchMinXBlocksHintLabel);
+        updateBlocksHint(batchMaxXField, batchMaxXBlocksHintLabel);
+        updateBlocksHint(batchMinZField, batchMinZBlocksHintLabel);
+        updateBlocksHint(batchMaxZField, batchMaxZBlocksHintLabel);
+        updateBlocksHint(batchSquareSideField, batchSquareSideBlocksHintLabel);
         if (batchCreditLabel != null) batchCreditLabel.setText(getString("credit.text"));
         if (batchRightPanel != null) {
             batchRightPanel.setBorder(BorderFactory.createTitledBorder(getString("result.border")));

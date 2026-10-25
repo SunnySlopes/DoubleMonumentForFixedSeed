@@ -1,9 +1,9 @@
 # Double Monument For Fixed Seed  
 # 固定种子二联海底神殿搜索工具
 
-A GUI program for searching **double ocean monuments** (paired ocean monuments) in Minecraft Java Edition fixed seeds. Supports Minecraft Java Edition **1.18.2** through **26.2**.
+A GUI program for searching **double ocean monuments** (paired ocean monuments) in Minecraft Java Edition fixed seeds. Supports Minecraft Java Edition **1.18~26.3+**.
 
-用于在 Minecraft Java 版固定种子中搜索**二联海底神殿**（成对生成的海底神殿）的图形界面工具。支持 **1.18.2** 至 **26.2**。
+用于在 Minecraft Java 版固定种子中搜索**二联海底神殿**（成对生成的海底神殿）的图形界面工具。支持 **1.18~26.3+**。
 
 Search uses **cubiomes** via a native library (JNI): monument positions and **deep-ocean biome viability** (`isViableStructurePos` for monuments). Results may differ from older versions that used custom climate noise thresholds.
 
@@ -93,6 +93,10 @@ Default thread count is the number of CPU cores (capped at runtime). If you ente
 
 默认线程数为 CPU 核数（运行时会 clamp）。若输入超过 CPU 核数，会弹出确认框询问是否自动调整。
 
+The search area is measured in regions: `(MaxX - MinX) × (MaxZ - MinZ)`. If the area exceeds **1024×1024 regions**, a warning dialog is shown and the search is not started.
+
+搜索区域按 region 计算面积：`(MaxX - MinX) × (MaxZ - MinZ)`。面积超过 **1024×1024 个 region** 时会弹出提示并拒绝开始搜索。
+
 ---
 
 ### Tab 1: Single seed search / 单种子搜索
@@ -103,8 +107,19 @@ Default thread count is the number of CPU cores (capped at runtime). If you ente
 | Threads | **线程数** | **Thread Count** |
 | Version | **版本** | **Version** |
 | Region | **MinX / MaxX / MinZ / MaxZ (×512)** | same |
+| Square side | **正方形区域边长（默认 256，勾选）** | **Square side length (default 256, checked)** |
 | Language | **语言** (Chinese / English) | **Language** |
 | Option | **找到符合条件的二联时立即暂停** | **Pause immediately when a valid pair is found** |
+
+- Coordinate hints show the block coordinate/length (`region × 512`) next to each input.
+- 坐标换算：每个 MinX/MaxX/MinZ/MaxZ 和正方形边长输入框右侧会实时显示 ×512 后的方块坐标/长度。
+- Square mode fills Min/Max centered at `(0,0)` and disables manual Min/Max editing while checked.
+- 正方形选区：勾选后以 `(0,0)` 为中心自动填入 Min/Max，并禁用 Min/Max 手动输入。
+- Single-seed and batch square sides both default to **256**, centered at `(0,0)`.
+- 单种子和批量页的正方形边长都默认 **256**，以 `(0,0)` 为中心。
+
+- Only one version option is available: **1.18~26.3+**. Searches use the **26.3** generator.
+- 只有一个版本选项：**1.18~26.3+**，搜索使用 **26.3** 生成器。
 
 - Results format / 结果格式：`/tp x 50 z (dx=?, dz=? / dx=?, dz=?)`  
   Low-efficiency pairs append / 低效配对后缀：` - 效率会略微损失 / - slightly reduced efficiency`

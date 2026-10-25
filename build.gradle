@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'org.example'
-version = '2.1'
+version = '2.2'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -173,12 +173,6 @@ tasks.register('prepareNativeResources') {
                 from(buildNativeDir)
                 include('*.dll', '**/*.dll')
                 into(new File(outDir, 'native/windows'))
-            }
-            copy {
-                from(buildNativeDir)
-                include('libmonumentFinderLibJ.dll')
-                into(new File(outDir, 'native/windows'))
-                rename { 'monumentFinderLibJ.dll' }
             }
             copy {
                 from(buildNativeDir)

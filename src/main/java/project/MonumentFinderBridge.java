@@ -26,10 +26,15 @@ public final class MonumentFinderBridge {
     public static final int MC_1_21 = MC_1_21_1;
     public static final int MC_26_1 = 33;
     public static final int MC_26_2 = 34;
+    public static final int MC_26_3 = 35;
 
-    public static final String[] SUPPORTED_VERSION_LABELS = {
-            "26.2", "26.1", "1.21.1", "1.20.1", "1.19.2", "1.18.2"
-    };
+    /**
+     * The UI exposes a single supported version range. Ocean monument positions
+     * and deep-ocean viability are shared across this range, so searches always
+     * use the newest generator (26.3).
+     */
+    public static final String VERSION_LABEL = "1.18~26.3+";
+    public static final String[] SUPPORTED_VERSION_LABELS = { VERSION_LABEL };
 
     /** ints per pair result: hangX, hangZ, dx, dz, lowEfficiencyFlag */
     public static final int PAIR_STRIDE = 5;
@@ -124,17 +129,11 @@ public final class MonumentFinderBridge {
         return names;
     }
 
+    /**
+     * The UI only exposes {@link #VERSION_LABEL}; every search uses MC 26.3.
+     */
     public static int mcFromVersionString(String versionString) {
-        if (versionString == null) return MC_26_2;
-        return switch (versionString) {
-            case "1.18.2" -> MC_1_18;
-            case "1.19.2" -> MC_1_19;
-            case "1.20.1" -> MC_1_20;
-            case "1.21.1" -> MC_1_21_1;
-            case "26.1" -> MC_26_1;
-            case "26.2" -> MC_26_2;
-            default -> MC_26_2;
-        };
+        return MC_26_3;
     }
 
     public static native int[] monumentSearch(
