@@ -119,11 +119,14 @@ public class MonumentSearchRunner {
             boolean biomeCheck,
             int pairLevel,
             int minGroupArea,
+            int searchModes,
+            int filterMode,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
         if (isRunning && isPaused && threadCount > 0) {
             restartWithNewThreadCount(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback,
-                    resultCallback, pauseOnPairFound, biomeCheck, pairLevel, minGroupArea, resultFormatter, nativeErrorMessage);
+                    resultCallback, pauseOnPairFound, biomeCheck, pairLevel, minGroupArea, searchModes, filterMode,
+                    resultFormatter, nativeErrorMessage);
             return;
         }
         if (isRunning) {
@@ -132,7 +135,7 @@ public class MonumentSearchRunner {
 
         Thread t = new Thread(
                 () -> runSearch(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback, resultCallback,
-                        pauseOnPairFound, biomeCheck, pairLevel, minGroupArea, resultFormatter, nativeErrorMessage),
+                        pauseOnPairFound, biomeCheck, pairLevel, minGroupArea, searchModes, filterMode, resultFormatter, nativeErrorMessage),
                 "monument-search");
         t.setDaemon(true);
         searchThread = t;
@@ -155,13 +158,15 @@ public class MonumentSearchRunner {
             boolean biomeCheck,
             int pairLevel,
             int minGroupArea,
+            int searchModes,
+            int filterMode,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
         if (isRunning) {
             return;
         }
         runSearch(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback, resultCallback,
-                pauseOnPairFound, biomeCheck, pairLevel, minGroupArea, resultFormatter, nativeErrorMessage);
+                pauseOnPairFound, biomeCheck, pairLevel, minGroupArea, searchModes, filterMode, resultFormatter, nativeErrorMessage);
     }
 
     /**
@@ -187,6 +192,8 @@ public class MonumentSearchRunner {
             boolean biomeCheck,
             int pairLevel,
             int minGroupArea,
+            int searchModes,
+            int filterMode,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
         stop();
@@ -199,7 +206,7 @@ public class MonumentSearchRunner {
         isRunning = false;
         isPaused = false;
         startSearch(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback, resultCallback,
-                pauseOnPairFound, biomeCheck, pairLevel, minGroupArea, resultFormatter, nativeErrorMessage);
+                pauseOnPairFound, biomeCheck, pairLevel, minGroupArea, searchModes, filterMode, resultFormatter, nativeErrorMessage);
     }
 
     private void runSearch(
@@ -215,6 +222,8 @@ public class MonumentSearchRunner {
             boolean biomeCheck,
             int pairLevel,
             int minGroupArea,
+            int searchModes,
+            int filterMode,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
         isRunning = true;
@@ -289,7 +298,7 @@ public class MonumentSearchRunner {
             try {
                 int[] raw = MonumentFinderBridge.monumentSearch(
                         seed, minX, maxX, minZ, maxZ, mc, threads, pauseOnPairFound, pairLevel,
-                        biomeCheck, minGroupArea);
+                        biomeCheck, minGroupArea, searchModes, filterMode);
                 pollIncrementalResults(resultCallback, resultFormatter);
                 if (raw != null) {
                     emitRawResults(raw, resultCallback, resultFormatter);
@@ -340,11 +349,21 @@ public class MonumentSearchRunner {
         for (int i = 0; i + MonumentFinderBridge.PAIR_STRIDE <= raw.length; i += MonumentFinderBridge.PAIR_STRIDE) {
             int x = raw[i];
             int z = raw[i + 1];
-            int dx = raw[i + 2];
-            int dz = raw[i + 3];
-            int count = raw[i + 4];
-            int area = raw[i + 5];
-            String line = resultFormatter.format(x, z, count, area, dx, dz);
+            int x2 = raw[i + 2];
+            int z2 = raw[i + 3];
+            int sx = raw[i + 4];
+            int sz = raw[i + 5];
+            int dx = raw[i + 6];
+            int dz = raw[i + 7];
+            int count = raw[i + 8];
+            int area = raw[i + 9];
+            int singleArea = raw[i + 10];
+            int areaMax = raw[i + 11];
+            int areaMaxX = raw[i + 12];
+            int areaMaxZ = raw[i + 13];
+            boolean dual = raw[i + 14] != 0;
+            String line = resultFormatter.format(x, z, x2, z2, sx, sz, count, area, singleArea,
+                    areaMax, areaMaxX, areaMaxZ, dx, dz, dual);
             synchronized (emittedResults) {
                 if (!emittedResults.add(line)) {
                     continue;

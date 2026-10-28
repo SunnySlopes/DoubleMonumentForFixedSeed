@@ -14,16 +14,26 @@ static constexpr size_t kMaxQueuedResults = 20000;
 
 static std::vector<jint> pairsToFlatInts(const std::vector<PairHit> &hits)
 {
-    // stride: x, z, dx, dz, count, area
+    // stride: x, z, x2, z2, singleX, singleZ, dx, dz, count, area, singleArea, areaMax,
+    //         areaMaxX, areaMaxZ, dual
     std::vector<jint> flat;
-    flat.reserve(hits.size() * 6);
+    flat.reserve(hits.size() * 15);
     for (const PairHit &h : hits) {
         flat.push_back(h.x);
         flat.push_back(h.z);
+        flat.push_back(h.x2);
+        flat.push_back(h.z2);
+        flat.push_back(h.singleX);
+        flat.push_back(h.singleZ);
         flat.push_back(h.dx);
         flat.push_back(h.dz);
         flat.push_back(h.count);
         flat.push_back(h.area);
+        flat.push_back(h.singleArea);
+        flat.push_back(h.areaMax);
+        flat.push_back(h.areaMaxX);
+        flat.push_back(h.areaMaxZ);
+        flat.push_back(h.dual ? 1 : 0);
     }
     return flat;
 }
@@ -43,7 +53,7 @@ static jintArray makeIntArray(JNIEnv *env, const std::vector<jint> &data)
 JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_monumentSearch
   (JNIEnv *env, jclass, jlong seed, jint minX, jint maxX, jint minZ, jint maxZ, jint mc,
    jint numThreads, jboolean pauseOnPairFound, jint pairLevel, jboolean biomeCheck,
-   jint minGroupArea) {
+   jint minGroupArea, jint searchModes, jint filterMode) {
     MonumentSearchConfig cfg;
     cfg.seed = (uint64_t) seed;
     cfg.minX = minX;
@@ -54,7 +64,11 @@ JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_monumentSearch
     cfg.pauseOnPairFound = pauseOnPairFound == JNI_TRUE;
     cfg.pairLevel = pairLevel >= 2 && pairLevel <= 4 ? pairLevel : 2;
     cfg.biomeCheck = biomeCheck == JNI_TRUE;
-    cfg.minGroupArea = minGroupArea > 0 ? minGroupArea : 2 * 58 * 58;
+    // 0 = no area filter (the UI checkbox is off)
+    cfg.minGroupArea = minGroupArea > 0 ? minGroupArea : 0;
+    // search modes only apply to 3/4 groups; pairs always use the plain pair search
+    cfg.searchModes = (searchModes & 7) != 0 && cfg.pairLevel >= 3 ? (searchModes & 7) : 1;
+    cfg.filterMode = (filterMode >= 0 && filterMode <= 2) ? filterMode : 0;
 
     g_results.clear();
     g_results.setLimit(kMaxQueuedResults);

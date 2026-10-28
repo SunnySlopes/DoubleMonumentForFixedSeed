@@ -25,14 +25,19 @@ public final class MonumentFinderBridge {
     /** MC_1_21_1 alias */
     public static final int MC_1_21 = MC_1_21_1;
     public static final int MC_26_1 = 33;
+    /** cubiomes' newest profile; 26.3+ reuses it because worldgen is unchanged after 26.2 */
     public static final int MC_26_2 = 34;
 
+    /**
+     * Labels shown in the version pickers. {@code 26.2+} means "26.2 and later" (26.3, ...),
+     * which share the same generator profile as 26.2.
+     */
     public static final String[] SUPPORTED_VERSION_LABELS = {
-            "26.2", "26.1", "1.21.1", "1.20.1", "1.19.2", "1.18.2"
+            "26.2+", "26.1", "1.21.1", "1.20.1", "1.19.2", "1.18.2"
     };
 
-    /** ints per result: x, z, dx, dz, count(2/3/4), area */
-    public static final int PAIR_STRIDE = 6;
+    /** ints per result: x, z, x2, z2, singleX, singleZ, dx, dz, count, area, singleArea, areaMax, areaMaxX, areaMaxZ, dual */
+    public static final int PAIR_STRIDE = 15;
 
     static {
         loadNativeLibrary();
@@ -122,6 +127,11 @@ public final class MonumentFinderBridge {
         return names;
     }
 
+    /**
+     * Maps a picker label to the cubiomes generator constant. {@code 26.2+} (and any explicit
+     * 26.3 label) resolve to {@link #MC_26_2}, the newest profile; unknown labels fall back to it
+     * so a stale saved preference can never break a search.
+     */
     public static int mcFromVersionString(String versionString) {
         if (versionString == null) return MC_26_2;
         return switch (versionString) {
@@ -130,11 +140,23 @@ public final class MonumentFinderBridge {
             case "1.20.1" -> MC_1_20;
             case "1.21.1" -> MC_1_21_1;
             case "26.1" -> MC_26_1;
-            case "26.2" -> MC_26_2;
+            case "26.2", "26.2+", "26.3", "26.3+" -> MC_26_2;
             default -> MC_26_2;
         };
     }
 
+    /** 3/4-group search modes as a bitmask; any combination may be enabled at once. */
+    public static final int SEARCH_SINGLE = 1; // one dummy: single-point optimum
+    public static final int SEARCH_DUAL = 2;   // two dummies: union under the span constraint
+    public static final int SEARCH_GATE = 4;   // one gate: unlimited-dummy ceiling in one footprint
+
+    /**
+     * @param minGroupArea area threshold for 3/4 groups; the reported area must strictly exceed
+     *                     it. 0 disables the filter (the UI checkbox is off). Ignored for pairs.
+     * @param searchModes  bitmask of {@link #SEARCH_SINGLE} / {@link #SEARCH_DUAL} /
+     *                     {@link #SEARCH_GATE}; a group is reported when at least one enabled
+     *                     mode passes. Pairs always use the plain pair search.
+     */
     public static native int[] monumentSearch(
             long seed,
             int minX,
@@ -146,7 +168,9 @@ public final class MonumentFinderBridge {
             boolean pauseOnPairFound,
             int pairLevel,
             boolean biomeCheck,
-            int minGroupArea);
+            int minGroupArea,
+            int searchModes,
+            int filterMode);
 
     /** [current, total, status] or null; counters are 64-bit (full-world searches exceed 2^31) */
     public static native long[] getSearchProgress();

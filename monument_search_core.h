@@ -89,6 +89,57 @@ int monument_afk_coverage(
     int *outX,
     int *outZ);
 
+/** Optimal TWO AFK points (dual dummies) for n (2..4) monuments: a spawning block counts when
+ *  within 128 blocks of either point (multiset area semantics as above), subject to the
+ *  farm-footprint constraint that the counted area fits max-min <= 256 per axis (a single
+ *  128-disk spans exactly 256, so only dual pairs sprawled wider than one disk are excluded).
+ *  Alternating exact maximization: each half-step picks the globally best span-valid partner
+ *  via the union identity union(a,b) = cov(a) + |disk(b)\disk(a)| (field argmax over the
+ *  provably span-safe rectangle plus exactly validated cells outside it), started from the
+ *  single-point optimum and from every non-trivial bipartition (duplicate starts skipped).
+ *  Also outputs the optimal SINGLE-dummy area and point (a single disk is always span-valid).
+ *  Heuristic: each half-step is exact, the joint optimum is not proven globally.
+ *  @return area of the returned pair; never below the single-dummy optimum (when no better pair
+ *          exists the single optimum is returned with both points coincident). */
+int monument_afk_coverage_dual(
+    const MonumentBlockPos *p,
+    int n,
+    int ax,
+    int az,
+    int *outX1,
+    int *outZ1,
+    int *outX2,
+    int *outZ2,
+    int *outSingleArea,
+    int *outSingleX,
+    int *outSingleZ);
+
+/** Same optimum as monument_afk_coverage_dual but stops as soon as an area >= target is reached
+ *  (used by the group contribution filter, which only needs the comparison).
+ *  @return 1 when the optimum is >= target (possibly an early-exit lower bound, never below the
+ *          single-dummy optimum), 0 otherwise. */
+int monument_afk_coverage_dual_reaches(
+    const MonumentBlockPos *p,
+    int n,
+    int ax,
+    int az,
+    int target);
+
+/** Area ceiling for the group when the number of AFK dummies is unbounded but the same farm
+ *  footprint constraint applies (counted blocks must fit max-min <= 256 per axis, i.e. inside a
+ *  257x257 block window). Returns the largest number of box blocks any such window contains with
+ *  multiset semantics, so area_single <= area_dual <= monument_group_max_area <= n*ax*az.
+ *  Also outputs the centre of mass of the blocks counted in the winning window (the overworld
+ *  point a single gate/portal for that footprint would link to). Reference value only, not
+ *  reachable with one/two dummies. Returns 0 on invalid input or allocation failure. */
+int monument_group_max_area(
+    const MonumentBlockPos *p,
+    int n,
+    int ax,
+    int az,
+    int *outX,
+    int *outZ);
+
 /** Build the pairwise joint-coverage upper-bound table once (call before 3/4 searches). */
 void monument_ensure_pair_upper_bounds(void);
 

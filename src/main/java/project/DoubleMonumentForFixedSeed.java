@@ -7,7 +7,12 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -55,7 +60,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JLabel batchVersionLabel;
     private JLabel batchPairLevelLabel;
     private JComboBox<String> batchPairLevelComboBox;
-    private JLabel batchMinGroupAreaLabel;
     private JLabel batchMinXLabel;
     private JLabel batchMaxXLabel;
     private JLabel batchMinZLabel;
@@ -69,7 +73,22 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JComboBox<String> versionComboBox;
     private JCheckBox pauseOnPairFoundCheckBox;
     private JCheckBox biomeCheckCheckBox;
+    // area filter (optional) + search mode (exclusive: single dummy / dual dummy / single gate)
+    private JPanel searchAreaPanel;
+    private JPanel searchModePanel;
+    private JPanel batchAreaPanel;
+    private JPanel batchModePanel;
+    private JCheckBox searchMinAreaCheckBox;
+    private JComboBox<String> searchAreaTypeComboBox;
+    private JCheckBox searchSingleModeCheckBox;
+    private JCheckBox searchDualModeCheckBox;
+    private JCheckBox searchGateModeCheckBox;
     private JCheckBox batchBiomeCheckCheckBox;
+    private JCheckBox batchMinAreaCheckBox;
+    private JComboBox<String> batchAreaTypeComboBox;
+    private JCheckBox batchSingleModeCheckBox;
+    private JCheckBox batchDualModeCheckBox;
+    private JCheckBox batchGateModeCheckBox;
     private JTextField minXField;
     private JTextField maxXField;
     private JTextField minZField;
@@ -79,12 +98,14 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JButton searchStopButton;
     private JButton searchResetButton;
     private JButton searchExportButton;
+    private JButton searchCsvButton;
     private JButton searchSortButton;
     private JProgressBar searchProgressBar;
     private JProgressBar searchComboProgressBar;
     private JLabel searchElapsedTimeLabel;
     private JLabel searchRemainingTimeLabel;
-    private JTextArea searchResultArea;
+    private JTable searchResultTable;
+    private final ResultTableModel searchModel = new ResultTableModel(false);
     private MonumentSearchRunner searcher;
     private volatile boolean isSearchRunning = false;
     private volatile boolean isSearchPaused = false;
@@ -96,6 +117,15 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private int lastSearchThreadCount = 0;
     private long formatContextSeed = 0;
     private int formatContextMc = MonumentFinderBridge.MC_26_2;
+    // Rows shown in the result table are held by searchModel; non-result lines (errors) go here
+    private final List<String> searchNotes = new ArrayList<>();
+    // Which result columns are shown (and exported) per tab, remembered for the session
+    private boolean[] columnsSingle = ResultTable.defaultSelection(false);
+    private boolean[] columnsBatch = ResultTable.defaultSelection(true);
+    private boolean csvHeaderSingle = true;
+    private boolean csvHeaderBatch = true;
+    private JButton searchColumnsButton;
+    private JButton batchColumnsButton;
     
     // Batch tab components
     private JButton batchImportButton;
@@ -113,11 +143,13 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private JButton batchResetButton;
     private JButton batchExportFullButton;
     private JButton batchExportSeedsButton;
+    private JButton batchCsvButton;
     private JButton batchSortButton;
     private JProgressBar batchProgressBar;
     private JLabel batchElapsedTimeLabel;
     private JLabel batchRemainingTimeLabel;
-    private JTextArea batchResultArea;
+    private JTable batchResultTable;
+    private final ResultTableModel batchModel = new ResultTableModel(true);
     private volatile boolean isBatchSearchRunning = false;
     private volatile boolean isBatchSearchPaused = false;
     /** Monitor for the batch pause wait loop; notifyAll on pause state changes instead of sleep polling */
@@ -125,6 +157,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     private MonumentSearchRunner currentBatchSearcher = null;
     private List<Long> batchSeedList = new ArrayList<>();
     private String batchSeedFileName = "";
+    // Rows shown in the batch table are held by batchModel; non-result lines (errors) go here
+    private final List<String> batchNotes = new ArrayList<>();
     
     private Font loadedFont = null;
 
@@ -176,12 +210,124 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         return biomeCheckCheckBox != null && biomeCheckCheckBox.isSelected();
     }
 
-    private String formatGroupResult(int x, int z, int count, int area, int dx, int dz) {
+    /** Enabled 3/4-group search modes as a bitmask (any combination may be active). */
+    private int selectedSearchModes() {
+        return isBatchSearchRunning
+                ? modesOf(batchSingleModeCheckBox, batchDualModeCheckBox, batchGateModeCheckBox)
+                : modesOf(searchSingleModeCheckBox, searchDualModeCheckBox, searchGateModeCheckBox);
+    }
+
+    /** Which computed area the threshold is compared against (0 single, 1 dual, 2 gate). */
+    private int selectedFilterMode() {
+        JComboBox<String> combo = isBatchSearchRunning ? batchAreaTypeComboBox : searchAreaTypeComboBox;
+        if (combo == null) {
+            return 0;
+        }
+        int idx = combo.getSelectedIndex();
+        return idx < 0 ? 0 : Math.min(idx, 2);
+    }
+
+    private static int modesOf(JCheckBox single, JCheckBox dual, JCheckBox gate) {
+        int modes = 0;
+        if (single != null && single.isSelected()) {
+            modes |= MonumentFinderBridge.SEARCH_SINGLE;
+        }
+        if (dual != null && dual.isSelected()) {
+            modes |= MonumentFinderBridge.SEARCH_DUAL;
+        }
+        if (gate != null && gate.isSelected()) {
+            modes |= MonumentFinderBridge.SEARCH_GATE;
+        }
+        return modes;
+    }
+
+    /** Area filter switch; off means "report every valid group". */
+    private boolean isMinAreaEnabled() {
+        return isBatchSearchRunning
+                ? batchMinAreaCheckBox != null && batchMinAreaCheckBox.isSelected()
+                : searchMinAreaCheckBox != null && searchMinAreaCheckBox.isSelected();
+    }
+
+    /**
+     * The area-type dropdown only has a meaning with exactly one mode enabled: it then mirrors
+     * that mode. With several modes enabled the dropdown is greyed out (the shared threshold is
+     * compared against each enabled mode's own area).
+     */
+    private void syncAreaTypeWithMode(boolean batch, int modes) {
+        JComboBox<String> combo = batch ? batchAreaTypeComboBox : searchAreaTypeComboBox;
+        if (combo == null) {
+            return;
+        }
+        boolean oneMode = Integer.bitCount(modes) == 1;
+        if (oneMode) {
+            int idx = modes == MonumentFinderBridge.SEARCH_SINGLE ? 0
+                    : modes == MonumentFinderBridge.SEARCH_DUAL ? 1 : 2;
+            if (combo.getSelectedIndex() != idx) {
+                combo.setSelectedIndex(idx);
+            }
+        }
+        boolean areaOn = batch
+                ? batchMinAreaCheckBox != null && batchMinAreaCheckBox.isSelected()
+                : searchMinAreaCheckBox != null && searchMinAreaCheckBox.isSelected();
+        combo.setEnabled(oneMode && areaOn);
+    }
+
+    /** Field + dropdown follow the area-filter checkbox; a running search disables everything. */
+    private void updateAreaControlsEnabled(boolean batch) {
+        boolean on = batch
+                ? batchMinAreaCheckBox != null && batchMinAreaCheckBox.isSelected()
+                : searchMinAreaCheckBox != null && searchMinAreaCheckBox.isSelected();
+        int modes = modesOf(
+                batch ? batchSingleModeCheckBox : searchSingleModeCheckBox,
+                batch ? batchDualModeCheckBox : searchDualModeCheckBox,
+                batch ? batchGateModeCheckBox : searchGateModeCheckBox);
+        boolean oneMode = Integer.bitCount(modes) == 1;
+        if (batch) {
+            if (batchMinGroupAreaField != null) batchMinGroupAreaField.setEnabled(on);
+            if (batchAreaTypeComboBox != null) batchAreaTypeComboBox.setEnabled(on && oneMode);
+        } else {
+            if (searchMinGroupAreaField != null) searchMinGroupAreaField.setEnabled(on);
+            if (searchAreaTypeComboBox != null) searchAreaTypeComboBox.setEnabled(on && oneMode);
+        }
+    }
+
+    private void setModeControlsEnabled(boolean batch, boolean enabled) {
+        if (batch) {
+            if (batchMinAreaCheckBox != null) batchMinAreaCheckBox.setEnabled(enabled);
+            if (batchSingleModeCheckBox != null) batchSingleModeCheckBox.setEnabled(enabled);
+            if (batchDualModeCheckBox != null) batchDualModeCheckBox.setEnabled(enabled);
+            if (batchGateModeCheckBox != null) batchGateModeCheckBox.setEnabled(enabled);
+        } else {
+            if (searchMinAreaCheckBox != null) searchMinAreaCheckBox.setEnabled(enabled);
+            if (searchSingleModeCheckBox != null) searchSingleModeCheckBox.setEnabled(enabled);
+            if (searchDualModeCheckBox != null) searchDualModeCheckBox.setEnabled(enabled);
+            if (searchGateModeCheckBox != null) searchGateModeCheckBox.setEnabled(enabled);
+        }
+        if (!enabled) {
+            if (batch) {
+                if (batchMinGroupAreaField != null) batchMinGroupAreaField.setEnabled(false);
+                if (batchAreaTypeComboBox != null) batchAreaTypeComboBox.setEnabled(false);
+            } else {
+                if (searchMinGroupAreaField != null) searchMinGroupAreaField.setEnabled(false);
+                if (searchAreaTypeComboBox != null) searchAreaTypeComboBox.setEnabled(false);
+            }
+        } else {
+            updateAreaControlsEnabled(batch);
+        }
+    }
+
+    private String formatGroupResult(int x, int z, int x2, int z2, int sx, int sz, int count,
+                                     int area, int singleArea, int areaMax, int areaMaxX,
+                                     int areaMaxZ, int dx, int dz, boolean dual) {
         String oceanTypeKey = null;
         if (isBiomeCheckSelected()) {
-            oceanTypeKey = MonumentFinderBridge.oceanTypeLabel(formatContextSeed, formatContextMc, x, z);
+            // dual: classify at the midpoint of the two dummy points
+            int cx = dual ? (x + x2) / 2 : x;
+            int cz = dual ? (z + z2) / 2 : z;
+            oceanTypeKey = MonumentFinderBridge.oceanTypeLabel(formatContextSeed, formatContextMc, cx, cz);
         }
-        return I18n.formatResult(x, z, count, area, dx, dz, oceanTypeKey);
+        return I18n.formatRow(formatContextSeed, x, z, x2, z2, sx, sz, count, area, singleArea,
+                areaMax, areaMaxX, areaMaxZ, dual, oceanTypeKey);
     }
 
     private void fillPairLevelComboItems(JComboBox<String> combo) {
@@ -265,6 +411,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             if (biomeCheckCheckBox != null) {
                 p.putBoolean("s.biome", biomeCheckCheckBox.isSelected());
             }
+            if (searchMinAreaCheckBox != null) {
+                p.putBoolean("s.minAreaOn", searchMinAreaCheckBox.isSelected());
+                p.putInt("s.mode", modesOf(searchSingleModeCheckBox, searchDualModeCheckBox,
+                        searchGateModeCheckBox));
+            }
             putText(p, "b.threads", batchThreadCountField);
             putCombo(p, "b.version", batchVersionComboBox);
             putCombo(p, "b.pair", batchPairLevelComboBox);
@@ -275,6 +426,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             putText(p, "b.maxZ", batchMaxZField);
             if (batchBiomeCheckCheckBox != null) {
                 p.putBoolean("b.biome", batchBiomeCheckCheckBox.isSelected());
+            }
+            if (batchMinAreaCheckBox != null) {
+                p.putBoolean("b.minAreaOn", batchMinAreaCheckBox.isSelected());
+                p.putInt("b.mode", modesOf(batchSingleModeCheckBox, batchDualModeCheckBox,
+                        batchGateModeCheckBox));
             }
         } catch (Throwable ignored) {
         }
@@ -296,6 +452,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             getText(p, "s.maxZ", maxZField);
             getBool(p, "s.pause", pauseOnPairFoundCheckBox);
             getBool(p, "s.biome", biomeCheckCheckBox);
+            getBool(p, "s.minAreaOn", searchMinAreaCheckBox);
+            getMode(p, "s.mode", searchSingleModeCheckBox, searchDualModeCheckBox, searchGateModeCheckBox);
+            getCombo(p, "s.filter", searchAreaTypeComboBox);
             getText(p, "b.threads", batchThreadCountField);
             getCombo(p, "b.version", batchVersionComboBox);
             getCombo(p, "b.pair", batchPairLevelComboBox);
@@ -305,6 +464,9 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             getText(p, "b.minZ", batchMinZField);
             getText(p, "b.maxZ", batchMaxZField);
             getBool(p, "b.biome", batchBiomeCheckCheckBox);
+            getBool(p, "b.minAreaOn", batchMinAreaCheckBox);
+            getMode(p, "b.mode", batchSingleModeCheckBox, batchDualModeCheckBox, batchGateModeCheckBox);
+            getCombo(p, "b.filter", batchAreaTypeComboBox);
         } catch (Throwable ignored) {
         }
         // Sync threshold field / combo bar visibility after pair level is restored
@@ -315,23 +477,42 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         return getString("error.nativeNotLoaded", "");
     }
 
-    /** Threshold field is shown only for pair level 3/4 */
+    private static void getMode(java.util.prefs.Preferences p, String key, JCheckBox single,
+                                JCheckBox dual, JCheckBox gate) {
+        if (single == null || dual == null || gate == null) {
+            return;
+        }
+        int mode = p.getInt(key, MonumentFinderBridge.SEARCH_SINGLE);
+        single.setSelected(mode == MonumentFinderBridge.SEARCH_SINGLE);
+        dual.setSelected(mode == MonumentFinderBridge.SEARCH_DUAL);
+        gate.setSelected(mode == MonumentFinderBridge.SEARCH_GATE);
+    }
+
+    /** Area filter row and the search-mode switches are shown only for pair level 3/4. */
     private void updateThresholdVisibility() {
         boolean singleVisible = getSelectedPairLevel(pairLevelComboBox) >= 3;
-        if (searchMinGroupAreaLabel != null) searchMinGroupAreaLabel.setVisible(singleVisible);
-        if (searchMinGroupAreaField != null) searchMinGroupAreaField.setVisible(singleVisible);
+        setVisible(singleVisible, searchMinAreaCheckBox, searchAreaPanel, searchModePanel);
+        updateAreaControlsEnabled(false);
         boolean batchVisible = getSelectedPairLevel(batchPairLevelComboBox) >= 3;
-        if (batchMinGroupAreaLabel != null) batchMinGroupAreaLabel.setVisible(batchVisible);
-        if (batchMinGroupAreaField != null) batchMinGroupAreaField.setVisible(batchVisible);
+        setVisible(batchVisible, batchMinAreaCheckBox, batchAreaPanel, batchModePanel);
+        updateAreaControlsEnabled(true);
+    }
+
+    private static void setVisible(boolean visible, JComponent... components) {
+        for (JComponent c : components) {
+            if (c != null) {
+                c.setVisible(visible);
+            }
+        }
     }
 
     /**
-     * Parses the min area threshold; only applies to pair level 3/4 (2-pair returns the default).
-     * Valid range [6728, 13455]; invalid or out-of-range returns -1 so the caller can block the search.
+     * Area threshold for 3/4 groups: 0 when the filter is off (or for pair level 2), otherwise the
+     * field value in [6728, 13455]; -1 (invalid) makes the caller block the search.
      */
-    private int readMinGroupArea(JComboBox<String> levelCombo, JTextField field) {
-        if (getSelectedPairLevel(levelCombo) < 3) {
-            return DEFAULT_MIN_GROUP_AREA;
+    private int readMinGroupArea(JComboBox<String> levelCombo, JTextField field, boolean enabled) {
+        if (getSelectedPairLevel(levelCombo) < 3 || !enabled) {
+            return 0;
         }
         try {
             int v = Integer.parseInt(field.getText().trim());
@@ -401,7 +582,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         gbc.weightx = 1.0;
         String[] versionOptions = MonumentFinderBridge.SUPPORTED_VERSION_LABELS;
         versionComboBox = new JComboBox<>(versionOptions);
-        versionComboBox.setSelectedIndex(0); // index 0 = MC 26.2
+        versionComboBox.setSelectedIndex(0); // index 0 = 26.2+ (26.2 and later)
         inputPanel.add(versionComboBox, gbc);
 
         // Pair level selector: search target 2/3/4 groups
@@ -420,19 +601,40 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         inputPanel.add(pairLevelComboBox, gbc);
         pairLevelComboBox.addActionListener(e -> updateThresholdVisibility());
 
-        // Min area threshold (visible only for pair level 3/4)
+        // Area filter (optional) + search mode, visible only for pair level 3/4
         gbc.gridx = 0;
         gbc.gridy = 4;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        searchMinGroupAreaLabel = new JLabel(getString("label.minGroupArea"));
-        searchMinGroupAreaLabel.setFont(getLoadedFont());
-        inputPanel.add(searchMinGroupAreaLabel, gbc);
+        searchMinAreaCheckBox = new JCheckBox(getString("check.minArea"));
+        searchMinAreaCheckBox.setFont(getLoadedFont());
+        searchMinAreaCheckBox.setSelected(true);
+        searchMinAreaCheckBox.addActionListener(e -> updateAreaControlsEnabled(false));
+        inputPanel.add(searchMinAreaCheckBox, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
-        searchMinGroupAreaField = new JTextField(String.valueOf(DEFAULT_MIN_GROUP_AREA), 20);
-        inputPanel.add(searchMinGroupAreaField, gbc);
+        searchAreaPanel = new JPanel(new BorderLayout(4, 0));
+        searchAreaTypeComboBox = new JComboBox<>(new String[]{
+                getString("area.single"), getString("area.dual"), getString("area.gate")});
+        searchAreaTypeComboBox.addActionListener(e -> {
+            if (searchSingleModeCheckBox == null) {
+                return;
+            }
+            // picking an area type also enables that mode (the others stay as they are)
+            int idx = searchAreaTypeComboBox.getSelectedIndex();
+            if (idx == 0) {
+                searchSingleModeCheckBox.setSelected(true);
+            } else if (idx == 1) {
+                searchDualModeCheckBox.setSelected(true);
+            } else if (idx == 2) {
+                searchGateModeCheckBox.setSelected(true);
+            }
+        });
+        searchAreaPanel.add(searchAreaTypeComboBox, BorderLayout.WEST);
+        searchMinGroupAreaField = new JTextField(String.valueOf(DEFAULT_MIN_GROUP_AREA), 8);
+        searchAreaPanel.add(searchMinGroupAreaField, BorderLayout.CENTER);
+        inputPanel.add(searchAreaPanel, gbc);
 
         gbc.gridx = 0;
         gbc.gridy = 5;
@@ -544,9 +746,30 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         biomeCheckCheckBox.setFont(getLoadedFont());
         biomeCheckCheckBox.setSelected(true);
         inputPanel.add(biomeCheckCheckBox, gbc);
+
+        // Search mode for 3/4 groups: single dummy / dual dummy / single gate (exclusive)
+        gbc.gridx = 0;
+        gbc.gridy = 12;
+        gbc.gridwidth = 2;
+        searchSingleModeCheckBox = new JCheckBox(getString("check.modeSingle"));
+        searchDualModeCheckBox = new JCheckBox(getString("check.modeDual"));
+        searchGateModeCheckBox = new JCheckBox(getString("check.modeGate"));
+        for (JCheckBox box : new JCheckBox[]{searchSingleModeCheckBox, searchDualModeCheckBox,
+                searchGateModeCheckBox}) {
+            box.setFont(getLoadedFont());
+            box.addActionListener(e -> syncAreaTypeWithMode(false,
+                    modesOf(searchSingleModeCheckBox, searchDualModeCheckBox, searchGateModeCheckBox)));
+        }
+        searchSingleModeCheckBox.setSelected(true);
+        searchModePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        searchModePanel.add(searchSingleModeCheckBox);
+        searchModePanel.add(searchDualModeCheckBox);
+        searchModePanel.add(searchGateModeCheckBox);
+        searchModePanel.setVisible(false);
+        inputPanel.add(searchModePanel, gbc);
         gbc.gridwidth = 1;
 
-        JPanel buttonPanel = new JPanel(new FlowLayout());
+        JPanel buttonPanel = new JPanel(new GridLayout(1, 0, 4, 2)); // all buttons stay visible when narrow
         searchStartButton = new JButton(getString("button.startSearch"));
         searchPauseButton = new JButton(getString("button.pause"));
         searchStopButton = new JButton(getString("button.stop"));
@@ -566,7 +789,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
 
         JPanel creditButtonPanel = new JPanel(new BorderLayout());
         creditButtonPanel.add(creditPanel, BorderLayout.NORTH);
-        creditButtonPanel.add(buttonPanel, BorderLayout.SOUTH);
 
         JPanel progressPanel = new JPanel(new GridBagLayout());
         GridBagConstraints pgc = new GridBagConstraints();
@@ -596,29 +818,40 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         leftPanel.add(creditButtonPanel, BorderLayout.CENTER);
         
         JPanel leftBottomPanel = new JPanel(new BorderLayout());
+        leftBottomPanel.add(buttonPanel, BorderLayout.NORTH); // pinned: never clipped by the form above
         leftBottomPanel.add(progressPanel, BorderLayout.CENTER);
-        
+
+        JScrollPane leftScroll = new JScrollPane(leftPanel); // short window scrolls the form instead of hiding the buttons
+        leftScroll.setBorder(null);
+        leftScroll.getVerticalScrollBar().setUnitIncrement(16);
         JPanel leftContainer = new JPanel(new BorderLayout());
-        leftContainer.add(leftPanel, BorderLayout.CENTER);
+        leftContainer.add(leftScroll, BorderLayout.CENTER);
         leftContainer.add(leftBottomPanel, BorderLayout.SOUTH);
 
         // Right: results display
         searchRightPanel = new JPanel(new BorderLayout());
         searchRightPanel.setBorder(BorderFactory.createTitledBorder(getString("result.border")));
-        searchResultArea = new JTextArea();
-        searchResultArea.setEditable(false);
-        searchResultArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
-        JScrollPane scrollPane = new JScrollPane(searchResultArea);
+        searchResultTable = createResultTable(searchModel, false);
+        JScrollPane scrollPane = new JScrollPane(searchResultTable);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
-        JPanel exportSortPanel = new JPanel(new FlowLayout());
+        JPanel exportSortPanel = new JPanel(new GridLayout(1, 0, 4, 2)); // all buttons stay visible when narrow
         searchExportButton = new JButton(getString("button.export"));
         searchExportButton.addActionListener(e -> exportSearchResults());
+        searchCsvButton = new JButton(getString("button.exportCsv"));
+        searchCsvButton.addActionListener(e -> exportSearchResultsCsv());
+        searchColumnsButton = new JButton(getString("button.columns"));
+        searchColumnsButton.addActionListener(e -> showColumnPicker(searchResultTable, false));
         searchSortButton = new JButton(getString("button.sort"));
         searchSortButton.addActionListener(e -> sortSearchResults());
         exportSortPanel.add(searchExportButton);
+        exportSortPanel.add(searchCsvButton);
+        exportSortPanel.add(searchColumnsButton);
         exportSortPanel.add(searchSortButton);
         searchRightPanel.add(scrollPane, BorderLayout.CENTER);
         searchRightPanel.add(exportSortPanel, BorderLayout.SOUTH);
+        // keep the split pane from squeezing the export row out of the panel
+        searchRightPanel.setMinimumSize(new Dimension(140, 140));
+        scrollPane.setMinimumSize(new Dimension(0, 0));
 
         JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftContainer, searchRightPanel);
         splitPane.setDividerLocation(450);
@@ -710,6 +943,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         if (biomeCheckCheckBox != null) {
             biomeCheckCheckBox.setEnabled(true);
         }
+        setModeControlsEnabled(false, true);
                 minXField.setEnabled(true);
                 maxXField.setEnabled(true);
                 minZField.setEnabled(true);
@@ -717,7 +951,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 if (languageComboBox != null) {
                     languageComboBox.setEnabled(true);
                 }
-                searchResultArea.setText("");
+                resetSearchResults();
                 searchProgressBar.setValue(0);
                 searchProgressBar.setString(getString("progress.initial"));
                 searchRemainingTimeLabel.setText(getString("remainingTime.reset"));
@@ -769,64 +1003,48 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         }
     }
 
-    // Sort results by monument center distance to origin (0,0), nearest first
+    /** Builds a read-only results table: real column header (stays visible while scrolling). */
+    private JTable createResultTable(ResultTableModel model, boolean batch) {
+        return ResultTable.createTable(model, batch, getLoadedFont());
+    }
+
+    // Sort results by the recorded AFK point distance to origin (0,0), nearest first
     private void sortSearchResults() {
-        String text = searchResultArea.getText().trim();
-        if (text.isEmpty()) {
+        List<String[]> rows = searchModel.rows();
+        if (rows.isEmpty()) {
             return;
         }
-        
-        String[] lines = text.split("\n");
-        List<String[]> results = new ArrayList<>();
-        List<String> invalidLines = new ArrayList<>();
-        
-        for (String line : lines) {
-            line = line.trim();
-            if (line.isEmpty()) {
-                continue;
-            }
-            // Result line format: /tp x 50 z [type=...] area=... [(pairLevel)]
-            if (line.startsWith("/tp ")) {
-                try {
-                    String[] parts = line.split("\\s+");
-                    if (parts.length >= 4) {
-                        int x = Integer.parseInt(parts[1]);
-                        int z = Integer.parseInt(parts[3]);
-                        
-                        double distance = Math.sqrt(x * x + z * z);
-                        results.add(new String[]{String.valueOf(distance), line});
-                    } else {
-                        invalidLines.add(line);
-                    }
-                } catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
-                    invalidLines.add(line);
-                }
-            } else {
-                invalidLines.add(line);
-            }
+        rows.sort(Comparator.comparingLong(ResultTable::distanceSq));
+        searchModel.refresh();
+    }
+
+    /** Clears the single-seed results (the header is the table's own column header). */
+    private void resetSearchResults() {
+        searchModel.clear();
+        searchNotes.clear();
+    }
+
+    /** Fixed-width text of the current single-seed table, for the plain-text export. */
+    private String searchResultsText() {
+        int[] cols = ResultTable.visibleCellColumns(searchResultTable, false);
+        StringBuilder sb = new StringBuilder(ResultTable.header(cols)).append('\n');
+        for (String[] cells : searchModel.rows()) {
+            sb.append(ResultTable.line(cells, cols)).append('\n');
         }
-        
-        results.sort((a, b) -> {
-            double d1 = Double.parseDouble(a[0]);
-            double d2 = Double.parseDouble(b[0]);
-            return Double.compare(d1, d2);
-        });
-        
-        StringBuilder sb = new StringBuilder();
-        for (String[] result : results) {
-            sb.append(result[1]).append("\n");
+        for (String note : searchNotes) {
+            sb.append(note).append('\n');
         }
-        for (String invalid : invalidLines) {
-            sb.append(invalid).append("\n");
-        }
-        
-        searchResultArea.setText(sb.toString());
+        return sb.toString();
     }
 
     // Single-seed search actions
     private void startSearch() {
         // Validate min area threshold for pair level 3/4 (block search if invalid)
-        int minGroupArea = readMinGroupArea(pairLevelComboBox, searchMinGroupAreaField);
+        int minGroupArea = readMinGroupArea(pairLevelComboBox, searchMinGroupAreaField, searchMinAreaCheckBox == null || searchMinAreaCheckBox.isSelected());
+        if (getSelectedPairLevel(pairLevelComboBox) >= 3 && selectedSearchModes() == 0) {
+            JOptionPane.showMessageDialog(this, getString("error.selectSearchMode"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
+            return;
+        }
         if (minGroupArea < 0) {
             JOptionPane.showMessageDialog(this, getString("error.minGroupAreaInvalid"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
             return;
@@ -863,7 +1081,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                 if (threadCount != lastSearchThreadCount) {
                     String selectedVersion = (String) versionComboBox.getSelectedItem();
                     int mc = MonumentFinderBridge.mcFromVersionString(
-                            selectedVersion != null ? selectedVersion : "26.2");
+                            selectedVersion != null ? selectedVersion : "26.2+");
 
                     if (searcher == null || searcher.getMc() != mc) {
                         searcher = new MonumentSearchRunner(mc);
@@ -883,7 +1101,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     searcher.startSearch(seed, threadCount, minX, maxX, minZ, maxZ,
                             this::updateSearchProgress, this::addSearchResult, pauseOnPairFound,
                             isBiomeCheckSelected(), getSelectedPairLevel(pairLevelComboBox),
-                            minGroupArea,
+                            minGroupArea, selectedSearchModes(), selectedFilterMode(),
                             this::formatGroupResult, nativeErrorMessage());
                     
                     lastSearchThreadCount = threadCount;
@@ -1079,6 +1297,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             if (biomeCheckCheckBox != null) {
                 biomeCheckCheckBox.setEnabled(false);
             }
+            setModeControlsEnabled(false, false);
             if (languageComboBox != null) {
                 languageComboBox.setEnabled(false);
             }
@@ -1086,7 +1305,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             maxXField.setEnabled(false);
             minZField.setEnabled(false);
             maxZField.setEnabled(false);
-            searchResultArea.setText("");
+            resetSearchResults();
             searchProgressBar.setValue(0);
             searchProgressBar.setString(getString("progress.initial"));
             searchElapsedTimeLabel.setText(getString("elapsedTime.initial"));
@@ -1094,7 +1313,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
 
             String selectedVersion = (String) versionComboBox.getSelectedItem();
             int mc = MonumentFinderBridge.mcFromVersionString(
-                    selectedVersion != null ? selectedVersion : "26.2");
+                    selectedVersion != null ? selectedVersion : "26.2+");
 
             searcher = new MonumentSearchRunner(mc);
             formatContextSeed = seed;
@@ -1102,7 +1321,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             boolean pauseOnPairFound = pauseOnPairFoundCheckBox.isSelected();
             searcher.startSearch(seed, threadCount, minX, maxX, minZ, maxZ, this::updateSearchProgress, this::addSearchResult, pauseOnPairFound,
                             isBiomeCheckSelected(), getSelectedPairLevel(pairLevelComboBox),
-                    minGroupArea,
+                    minGroupArea, selectedSearchModes(), selectedFilterMode(),
                             this::formatGroupResult, nativeErrorMessage());
 
         } catch (NumberFormatException e) {
@@ -1149,6 +1368,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         if (biomeCheckCheckBox != null) {
             biomeCheckCheckBox.setEnabled(true);
         }
+        setModeControlsEnabled(false, true);
         minXField.setEnabled(true);
         maxXField.setEnabled(true);
         minZField.setEnabled(true);
@@ -1203,6 +1423,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         if (biomeCheckCheckBox != null) {
             biomeCheckCheckBox.setEnabled(true);
         }
+        setModeControlsEnabled(false, true);
                 if (languageComboBox != null) {
                     languageComboBox.setEnabled(true);
                 }
@@ -1218,13 +1439,34 @@ public class DoubleMonumentForFixedSeed extends JFrame {
 
     private void addSearchResult(String result) {
         SwingUtilities.invokeLater(() -> {
-            searchResultArea.append(result + "\n");
-            searchResultArea.setCaretPosition(searchResultArea.getDocument().getLength());
+            if (ResultTable.isRecord(result)) {
+                searchModel.addRow(ResultTable.parse(result));
+                // the native search pauses itself on the first hit; mirror that in the UI so the
+                // button reads "继续" and the elapsed timer stops
+                if (pauseOnPairFoundCheckBox != null && pauseOnPairFoundCheckBox.isSelected()
+                        && isSearchRunning && !isSearchPaused) {
+                    isSearchPaused = true;
+                    if (searchPauseButton != null) {
+                        searchPauseButton.setText(getString("button.resume"));
+                    }
+                    if (searcher != null) {
+                        searcher.pause();
+                    }
+                }
+            } else {
+                // not a table row: a message (e.g. native library failure)
+                boolean first = searchNotes.isEmpty();
+                searchNotes.add(result);
+                searchProgressBar.setString(result);
+                if (first) {
+                    JOptionPane.showMessageDialog(this, result, getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
+                }
+            }
         });
     }
 
     private void exportSearchResults() {
-        if (searchResultArea.getText().trim().isEmpty()) {
+        if (searchModel.getRowCount() == 0 && searchNotes.isEmpty()) {
             JOptionPane.showMessageDialog(this, getString("error.noResultsToExport"), getString("prompt.information"), JOptionPane.INFORMATION_MESSAGE);
             return;
         }
@@ -1238,12 +1480,102 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         if (result == JFileChooser.APPROVE_OPTION) {
             File file = fileChooser.getSelectedFile();
             try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8))) {
-                writer.print(searchResultArea.getText());
+                writer.print(searchResultsText());
                 JOptionPane.showMessageDialog(this, getString("success.export"), getString("prompt.success"), JOptionPane.INFORMATION_MESSAGE);
             } catch (IOException e) {
                 JOptionPane.showMessageDialog(this, getString("error.exportFailed", e.getMessage()), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
             }
         }
+    }
+
+    private void exportSearchResultsCsv() {
+        if (searchModel.getRowCount() == 0) {
+            JOptionPane.showMessageDialog(this, getString("error.noResultsToExport"), getString("prompt.information"), JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle(getString("dialog.exportCsv"));
+        fileChooser.setFileFilter(new FileNameExtensionFilter("CSV", "csv"));
+        fileChooser.setSelectedFile(new File(getString("file.searchOutputCsv")));
+
+        int result = fileChooser.showSaveDialog(this);
+        if (result == JFileChooser.APPROVE_OPTION) {
+            writeCsv(searchResultTable, csvHeaderSingle, ensureCsvExtension(fileChooser.getSelectedFile()));
+        }
+    }
+
+    /**
+     * Column picker: the checked columns become the table's columns (and therefore what the text
+     * and CSV exports contain). The header-row option only affects the CSV export.
+     */
+    private void showColumnPicker(JTable table, boolean batch) {
+        int[] all = ResultTable.allColumns();
+        boolean[] current = batch ? columnsBatch : columnsSingle;
+        JPanel panel = new JPanel(new GridLayout(0, 1, 2, 1));
+        JCheckBox[] boxes = new JCheckBox[all.length];
+        for (int i = 0; i < all.length; i++) {
+            boxes[i] = new JCheckBox(I18n.get("col." + ResultTable.KEYS[all[i]]), current[all[i]]);
+            panel.add(boxes[i]);
+        }
+        panel.add(new JSeparator());
+        JCheckBox headerBox = new JCheckBox(getString("csv.includeHeader"),
+                batch ? csvHeaderBatch : csvHeaderSingle);
+        panel.add(headerBox);
+
+        int answer = JOptionPane.showConfirmDialog(this, panel, getString("dialog.columns"),
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (answer != JOptionPane.OK_OPTION) {
+            return;
+        }
+
+        boolean[] chosen = new boolean[all.length];
+        int count = 0;
+        for (int i = 0; i < all.length; i++) {
+            chosen[all[i]] = boxes[i].isSelected();
+            if (boxes[i].isSelected()) {
+                count++;
+            }
+        }
+        if (count == 0) {
+            JOptionPane.showMessageDialog(this, getString("error.selectAtLeastOneColumn"),
+                    getString("prompt.information"), JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        if (batch) {
+            columnsBatch = chosen;
+            csvHeaderBatch = headerBox.isSelected();
+        } else {
+            columnsSingle = chosen;
+            csvHeaderSingle = headerBox.isSelected();
+        }
+        ResultTable.setVisibleColumns(table, batch, chosen);
+    }
+
+    /** Writes the columns currently shown in {@code table}, in display order. */
+    private void writeCsv(JTable table, boolean includeHeader, File file) {
+        StringBuilder sb = new StringBuilder();
+        if (includeHeader) {
+            sb.append(ResultTable.csvHeader(table)).append('\n');
+        }
+        for (int row = 0; row < table.getRowCount(); row++) {
+            sb.append(ResultTable.csvRow(table, row)).append('\n');
+        }
+        try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8))) {
+            writer.print(sb);
+            JOptionPane.showMessageDialog(this, getString("success.export"), getString("prompt.success"), JOptionPane.INFORMATION_MESSAGE);
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, getString("error.exportFailed", e.getMessage()), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    /** Appends ".csv" when the user typed a name without an extension. */
+    private static File ensureCsvExtension(File file) {
+        String name = file.getName();
+        if (name.toLowerCase(Locale.ROOT).endsWith(".csv")) {
+            return file;
+        }
+        return new File(file.getParentFile(), name + ".csv");
     }
 
 
@@ -1413,19 +1745,40 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         inputPanel.add(batchPairLevelComboBox, gbc);
         batchPairLevelComboBox.addActionListener(e -> updateThresholdVisibility());
 
-        // Min area threshold (visible only for pair level 3/4)
+        // Area filter (optional) + search mode, visible only for pair level 3/4
         gbc.gridx = 0;
         gbc.gridy = 5;
         gbc.fill = GridBagConstraints.NONE;
         gbc.weightx = 0;
-        batchMinGroupAreaLabel = new JLabel(getString("label.minGroupArea"));
-        batchMinGroupAreaLabel.setFont(getLoadedFont());
-        inputPanel.add(batchMinGroupAreaLabel, gbc);
+        batchMinAreaCheckBox = new JCheckBox(getString("check.minArea"));
+        batchMinAreaCheckBox.setFont(getLoadedFont());
+        batchMinAreaCheckBox.setSelected(true);
+        batchMinAreaCheckBox.addActionListener(e -> updateAreaControlsEnabled(true));
+        inputPanel.add(batchMinAreaCheckBox, gbc);
         gbc.gridx = 1;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
-        batchMinGroupAreaField = new JTextField(String.valueOf(DEFAULT_MIN_GROUP_AREA), 20);
-        inputPanel.add(batchMinGroupAreaField, gbc);
+        batchAreaPanel = new JPanel(new BorderLayout(4, 0));
+        batchAreaTypeComboBox = new JComboBox<>(new String[]{
+                getString("area.single"), getString("area.dual"), getString("area.gate")});
+        batchAreaTypeComboBox.addActionListener(e -> {
+            if (batchSingleModeCheckBox == null) {
+                return;
+            }
+            // picking an area type also enables that mode (the others stay as they are)
+            int idx = batchAreaTypeComboBox.getSelectedIndex();
+            if (idx == 0) {
+                batchSingleModeCheckBox.setSelected(true);
+            } else if (idx == 1) {
+                batchDualModeCheckBox.setSelected(true);
+            } else if (idx == 2) {
+                batchGateModeCheckBox.setSelected(true);
+            }
+        });
+        batchAreaPanel.add(batchAreaTypeComboBox, BorderLayout.WEST);
+        batchMinGroupAreaField = new JTextField(String.valueOf(DEFAULT_MIN_GROUP_AREA), 8);
+        batchAreaPanel.add(batchMinGroupAreaField, BorderLayout.CENTER);
+        inputPanel.add(batchAreaPanel, gbc);
 
         gbc.gridx = 0;
         gbc.gridy = 10;
@@ -1436,6 +1789,26 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         batchBiomeCheckCheckBox.setFont(getLoadedFont());
         batchBiomeCheckCheckBox.setSelected(true);
         inputPanel.add(batchBiomeCheckCheckBox, gbc);
+
+        // Search mode for batch searches (visible only for pair level 3/4)
+        gbc.gridx = 0;
+        gbc.gridy = 11;
+        batchSingleModeCheckBox = new JCheckBox(getString("check.modeSingle"));
+        batchDualModeCheckBox = new JCheckBox(getString("check.modeDual"));
+        batchGateModeCheckBox = new JCheckBox(getString("check.modeGate"));
+        for (JCheckBox box : new JCheckBox[]{batchSingleModeCheckBox, batchDualModeCheckBox,
+                batchGateModeCheckBox}) {
+            box.setFont(getLoadedFont());
+            box.addActionListener(e -> syncAreaTypeWithMode(true,
+                    modesOf(batchSingleModeCheckBox, batchDualModeCheckBox, batchGateModeCheckBox)));
+        }
+        batchSingleModeCheckBox.setSelected(true);
+        batchModePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        batchModePanel.add(batchSingleModeCheckBox);
+        batchModePanel.add(batchDualModeCheckBox);
+        batchModePanel.add(batchGateModeCheckBox);
+        batchModePanel.setVisible(false);
+        inputPanel.add(batchModePanel, gbc);
         gbc.gridwidth = 1;
 
         gbc.gridx = 0;
@@ -1510,7 +1883,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         });
         inputPanel.add(batchMaxZField, gbc);
 
-        JPanel buttonPanel = new JPanel(new FlowLayout());
+        JPanel buttonPanel = new JPanel(new GridLayout(1, 0, 4, 2)); // all buttons stay visible when narrow
         batchStartButton = new JButton(getString("button.startSearch"));
         batchPauseButton = new JButton(getString("button.pause"));
         batchStopButton = new JButton(getString("button.stop"));
@@ -1560,32 +1933,43 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         leftPanel.add(creditButtonPanel, BorderLayout.CENTER);
         
         JPanel leftBottomPanel = new JPanel(new BorderLayout());
+        leftBottomPanel.add(buttonPanel, BorderLayout.NORTH); // pinned: never clipped by the form above
         leftBottomPanel.add(progressPanel, BorderLayout.CENTER);
-        
+
+        JScrollPane leftScroll = new JScrollPane(leftPanel); // short window scrolls the form instead of hiding the buttons
+        leftScroll.setBorder(null);
+        leftScroll.getVerticalScrollBar().setUnitIncrement(16);
         JPanel leftContainer = new JPanel(new BorderLayout());
-        leftContainer.add(leftPanel, BorderLayout.CENTER);
+        leftContainer.add(leftScroll, BorderLayout.CENTER);
         leftContainer.add(leftBottomPanel, BorderLayout.SOUTH);
 
         // Right: results display
         batchRightPanel = new JPanel(new BorderLayout());
         batchRightPanel.setBorder(BorderFactory.createTitledBorder(getString("result.border")));
-        batchResultArea = new JTextArea();
-        batchResultArea.setEditable(false);
-        batchResultArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
-        JScrollPane scrollPane = new JScrollPane(batchResultArea);
+        batchResultTable = createResultTable(batchModel, true);
+        JScrollPane scrollPane = new JScrollPane(batchResultTable);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
-        JPanel exportSortPanel = new JPanel(new FlowLayout());
+        JPanel exportSortPanel = new JPanel(new GridLayout(1, 0, 4, 2)); // all buttons stay visible when narrow
         batchExportFullButton = new JButton(getString("button.exportFull"));
         batchExportFullButton.addActionListener(e -> exportBatchResults(true));
         batchExportSeedsButton = new JButton(getString("button.exportSeeds"));
         batchExportSeedsButton.addActionListener(e -> exportBatchResults(false));
+        batchCsvButton = new JButton(getString("button.exportCsv"));
+        batchCsvButton.addActionListener(e -> exportBatchResultsCsv());
+        batchColumnsButton = new JButton(getString("button.columns"));
+        batchColumnsButton.addActionListener(e -> showColumnPicker(batchResultTable, true));
         batchSortButton = new JButton(getString("button.sort"));
         batchSortButton.addActionListener(e -> sortBatchResults());
         exportSortPanel.add(batchExportFullButton);
         exportSortPanel.add(batchExportSeedsButton);
+        exportSortPanel.add(batchCsvButton);
+        exportSortPanel.add(batchColumnsButton);
         exportSortPanel.add(batchSortButton);
         batchRightPanel.add(scrollPane, BorderLayout.CENTER);
         batchRightPanel.add(exportSortPanel, BorderLayout.SOUTH);
+        // keep the split pane from squeezing the export row out of the panel
+        batchRightPanel.setMinimumSize(new Dimension(140, 140));
+        scrollPane.setMinimumSize(new Dimension(0, 0));
 
         JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftContainer, batchRightPanel);
         splitPane.setDividerLocation(450);
@@ -1755,7 +2139,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             
             String selectedVersion = (String) batchVersionComboBox.getSelectedItem();
             int mc = MonumentFinderBridge.mcFromVersionString(
-                    selectedVersion != null ? selectedVersion : "26.2");
+                    selectedVersion != null ? selectedVersion : "26.2+");
 
             // Final copies for lambda capture
             final int finalThreadCount = threadCount;
@@ -1766,7 +2150,11 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             final int finalPairLevel = getSelectedPairLevel(batchPairLevelComboBox);
 
             // Validate min area threshold for pair level 3/4 (block search if invalid)
-            int batchMinGroupArea = readMinGroupArea(batchPairLevelComboBox, batchMinGroupAreaField);
+            int batchMinGroupArea = readMinGroupArea(batchPairLevelComboBox, batchMinGroupAreaField, batchMinAreaCheckBox == null || batchMinAreaCheckBox.isSelected());
+            if (getSelectedPairLevel(batchPairLevelComboBox) >= 3 && selectedSearchModes() == 0) {
+                JOptionPane.showMessageDialog(this, getString("error.selectSearchMode"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
+                return;
+            }
             if (batchMinGroupArea < 0) {
                 JOptionPane.showMessageDialog(this, getString("error.minGroupAreaInvalid"), getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
                 return;
@@ -1792,7 +2180,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             if (batchBiomeCheckCheckBox != null) {
                 batchBiomeCheckCheckBox.setEnabled(false);
             }
-            batchResultArea.setText("");
+            setModeControlsEnabled(true, false);
+            resetBatchResults();
             batchProgressBar.setValue(0);
             batchProgressBar.setString(getString("progress.total", 0, batchSeedList.size(), 0.0));
             batchElapsedTimeLabel.setText(getString("elapsedTime.initial"));
@@ -1832,6 +2221,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                                     isBiomeCheckSelected(),
                                     finalPairLevel,
                                     finalMinGroupArea,
+                                    selectedSearchModes(),
+                                    selectedFilterMode(),
                                     this::formatGroupResult,
                                     nativeErrorMessage()),
                             "batch-monument-seed-" + seed);
@@ -1882,50 +2273,35 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     }
                     
                     List<String> allResults = batchSearcher.getResults();
-                    List<ResultItem> resultItems = new ArrayList<>();
-                    
+                    List<String[]> seedRows = new ArrayList<>();
+                    List<String> seedNotes = new ArrayList<>();
+
                     for (String resultStr : allResults) {
-                        // Result format: /tp x 50 z [type=...] area=... or area=... (pairLevel)
-                        String[] parts = resultStr.split("\\s+");
-                        if (parts.length >= 4 && parts[0].equals("/tp")) {
-                            try {
-                                int centerX = Integer.parseInt(parts[1]);
-                                int centerZ = Integer.parseInt(parts[3]);
-                                int area = getArea(parts);
-
-                                // Pair level: 2-pair has no suffix; 3/4 end with (3)/(4)
-                                int count;
-                                if (resultStr.contains("(4)")) {
-                                    count = 4;
-                                } else if (resultStr.contains("(3)")) {
-                                    count = 3;
-                                } else {
-                                    count = 2;
-                                }
-
-                                resultItems.add(new ResultItem(centerX, centerZ, count, area));
-                            } catch (NumberFormatException e) {
-                                // Skip unparseable lines
-                            }
+                        // the formatter yields one ResultTable record per hit; anything else is a
+                        // message (e.g. native library error) shown as-is
+                        if (ResultTable.isRecord(resultStr)) {
+                            seedRows.add(ResultTable.parse(resultStr));
+                        } else {
+                            seedNotes.add(resultStr);
                         }
                     }
-                    
-                    if (!resultItems.isEmpty()) {
-                        // Sort by squared distance to origin (x²+z²), nearest first
-                        resultItems.sort((a, b) -> {
-                            int distA = a.centerX * a.centerX + a.centerZ * a.centerZ;
-                            int distB = b.centerX * b.centerX + b.centerZ * b.centerZ;
-                            return Integer.compare(distA, distB);
-                        });
-                        
-                        final List<ResultItem> finalResults = resultItems;
+
+                    if (!seedRows.isEmpty() || !seedNotes.isEmpty()) {
+                        // nearest first (squared distance of the recorded AFK point)
+                        seedRows.sort(Comparator.comparingLong(ResultTable::distanceSq));
+
                         SwingUtilities.invokeLater(() -> {
-                            formatContextSeed = currentSeed;
-                            formatContextMc = mc;
-                            batchResultArea.append(currentSeed + "\n");
-                            for (ResultItem item : finalResults) {
-                                String resultLine = formatGroupResult(item.centerX, item.centerZ, item.count, item.area, 0, 0);
-                                batchResultArea.append(resultLine + "\n");
+                            for (String[] cells : seedRows) {
+                                batchModel.addRow(cells);
+                            }
+                            for (String note : seedNotes) {
+                                boolean first = batchNotes.isEmpty();
+                                batchNotes.add(note);
+                                batchProgressBar.setString(note);
+                                if (first) {
+                                    JOptionPane.showMessageDialog(this, note,
+                                            getString("prompt.error"), JOptionPane.ERROR_MESSAGE);
+                                }
                             }
                         });
                     }
@@ -1970,6 +2346,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
                     if (batchBiomeCheckCheckBox != null) {
                         batchBiomeCheckCheckBox.setEnabled(true);
                     }
+                    setModeControlsEnabled(true, true);
                     batchProgressBar.setString(getString("progress.complete", total, total));
                     batchRemainingTimeLabel.setText(getString("remainingTime.completed"));
                 });
@@ -1996,22 +2373,8 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             if (batchBiomeCheckCheckBox != null) {
                 batchBiomeCheckCheckBox.setEnabled(true);
             }
+            setModeControlsEnabled(true, true);
         }
-    }
-
-    private static int getArea(String[] parts) {
-        int area = 0;
-
-        for (String token : parts) {
-            int eq = token.indexOf('=');
-            if (eq > 0 && !token.startsWith("type=")) {
-                try {
-                    area = Integer.parseInt(token.substring(eq + 1));
-                } catch (NumberFormatException ignored) {
-                }
-            }
-        }
-        return area;
     }
 
     private void toggleBatchSearchPause() {
@@ -2082,8 +2445,7 @@ public class DoubleMonumentForFixedSeed extends JFrame {
     }
 
     private void exportBatchResults(boolean fullFormat) {
-        String text = batchResultArea.getText().trim();
-        if (text.isEmpty()) {
+        if (batchModel.getRowCount() == 0 && batchNotes.isEmpty()) {
             JOptionPane.showMessageDialog(this, getString("error.noResultsToExport"), getString("prompt.information"), JOptionPane.INFORMATION_MESSAGE);
             return;
         }
@@ -2098,18 +2460,15 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             File file = fileChooser.getSelectedFile();
             try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8))) {
                 if (fullFormat) {
-                    writer.print(text);
+                    writer.print(batchResultsText());
                 } else {
-                    // Seeds-only export: emit seed lines, skip /tp result lines
-                    String[] lines = text.split("\n");
-                    for (String line : lines) {
-                        line = line.trim();
-                        if (line.isEmpty()) {
-                            continue;
-                        }
-                        if (!line.startsWith("/tp")) {
-                            writer.println(line);
-                        }
+                    // Seeds-only export: one seed per seed that produced at least one hit
+                    Set<String> seeds = new LinkedHashSet<>();
+                    for (String[] cells : batchModel.rows()) {
+                        seeds.add(ResultTable.cell(cells, ResultTable.SEED));
+                    }
+                    for (String seed : seeds) {
+                        writer.println(seed);
                     }
                 }
                 JOptionPane.showMessageDialog(this, getString("success.export"), getString("prompt.success"), JOptionPane.INFORMATION_MESSAGE);
@@ -2119,102 +2478,64 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         }
     }
 
-    private void sortBatchResults() {
-        String text = batchResultArea.getText().trim();
-        if (text.isEmpty()) {
+    /** Exports the batch results as CSV using the columns currently shown. */
+    private void exportBatchResultsCsv() {
+        if (batchModel.getRowCount() == 0) {
+            JOptionPane.showMessageDialog(this, getString("error.noResultsToExport"), getString("prompt.information"), JOptionPane.INFORMATION_MESSAGE);
             return;
         }
-        
-        // Parse text into per-seed groups
-        String[] lines = text.split("\n");
-        List<SeedResultGroup> groups = new ArrayList<>();
-        SeedResultGroup currentGroup = null;
-        
-        for (String line : lines) {
-            line = line.trim();
-            if (line.isEmpty()) {
-                continue;
-            }
-            if (line.startsWith("/tp")) {
-                if (currentGroup != null) {
-                    currentGroup.results.add(line);
-                }
-            } else {
-                if (currentGroup != null) {
-                    groups.add(currentGroup);
-                }
-                currentGroup = new SeedResultGroup();
-                currentGroup.seed = line;
-                currentGroup.results = new ArrayList<>();
-            }
-        }
-        if (currentGroup != null) {
-            groups.add(currentGroup);
-        }
-        
-        // Sort each group's results and record its nearest distance
-        for (SeedResultGroup group : groups) {
-            if (!group.results.isEmpty()) {
-                group.results.sort((a, b) -> {
-                    int distA = extractDistanceSquared(a);
-                    int distB = extractDistanceSquared(b);
-                    return Integer.compare(distA, distB);
-                });
-                // First result after sorting is the nearest to origin
-                group.minDistance = extractDistanceSquared(group.results.get(0));
-            } else {
-                group.minDistance = Integer.MAX_VALUE;
-            }
-        }
-        
-        groups.sort(Comparator.comparingInt(a -> a.minDistance));
-        
-        // Rebuild text, keeping only seeds with results
-        StringBuilder sb = new StringBuilder();
-        for (SeedResultGroup group : groups) {
-            if (!group.results.isEmpty()) {
-                sb.append(group.seed).append("\n");
-                for (String result : group.results) {
-                    sb.append(result).append("\n");
-                }
-            }
-        }
-        
-        batchResultArea.setText(sb.toString());
-    }
-    
-    private int extractDistanceSquared(String resultLine) {
-        try {
-            String[] parts = resultLine.split("\\s+");
-            if (parts.length >= 4 && parts[0].equals("/tp")) {
-                int x = Integer.parseInt(parts[1]);
-                int z = Integer.parseInt(parts[3]);
-                return x * x + z * z;
-            }
-        } catch (NumberFormatException e) {
-            // Unparseable lines sort last
-        }
-        return Integer.MAX_VALUE;
-    }
-    
-    private static class SeedResultGroup {
-        String seed;
-        List<String> results;
-        int minDistance; // Nearest distance to origin among this seed's results
-    }
-    
-    private static class ResultItem {
-        int centerX;
-        int centerZ;
-        int count;
-        int area;
 
-        ResultItem(int centerX, int centerZ, int count, int area) {
-            this.centerX = centerX;
-            this.centerZ = centerZ;
-            this.count = count;
-            this.area = area;
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle(getString("dialog.exportCsv"));
+        fileChooser.setFileFilter(new FileNameExtensionFilter("CSV", "csv"));
+        fileChooser.setSelectedFile(new File(getString("file.batchOutputCsv")));
+
+        int result = fileChooser.showSaveDialog(this);
+        if (result == JFileChooser.APPROVE_OPTION) {
+            writeCsv(batchResultTable, csvHeaderBatch, ensureCsvExtension(fileChooser.getSelectedFile()));
         }
+    }
+
+    /** Clears the batch results (the header is the table's own column header). */
+    private void resetBatchResults() {
+        batchModel.clear();
+        batchNotes.clear();
+    }
+
+    /** Fixed-width text of the current batch table, for the plain-text export. */
+    private String batchResultsText() {
+        int[] cols = ResultTable.visibleCellColumns(batchResultTable, true);
+        StringBuilder sb = new StringBuilder(ResultTable.header(cols)).append('\n');
+        for (String[] cells : batchModel.rows()) {
+            sb.append(ResultTable.line(cells, cols)).append('\n');
+        }
+        for (String note : batchNotes) {
+            sb.append(note).append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** Sorts each seed's rows and then the seeds, keeping only seeds that produced results. */
+    private void sortBatchResults() {
+        List<String[]> rows = batchModel.rows();
+        if (rows.isEmpty()) {
+            return;
+        }
+        Map<String, List<String[]>> bySeed = new LinkedHashMap<>();
+        for (String[] cells : rows) {
+            bySeed.computeIfAbsent(ResultTable.cell(cells, ResultTable.SEED), k -> new ArrayList<>()).add(cells);
+        }
+        for (List<String[]> group : bySeed.values()) {
+            group.sort(Comparator.comparingLong(ResultTable::distanceSq));
+        }
+        List<Map.Entry<String, List<String[]>>> groups = new ArrayList<>(bySeed.entrySet());
+        groups.sort(Comparator.comparingLong(e -> ResultTable.distanceSq(e.getValue().get(0))));
+
+        rows.clear();
+        for (Map.Entry<String, List<String[]>> group : groups) {
+            rows.addAll(group.getValue());
+        }
+        batchModel.refresh();
     }
 
     private void changeLanguage() {
@@ -2253,6 +2574,15 @@ public class DoubleMonumentForFixedSeed extends JFrame {
             }
             updateSingleSeedSearchTexts();
             updateBatchSearchTexts();
+            // header names are localized: rebuild the table headers and re-size the columns
+            if (searchResultTable != null) {
+                searchModel.structureChanged();
+                ResultTable.setVisibleColumns(searchResultTable, false, columnsSingle);
+            }
+            if (batchResultTable != null) {
+                batchModel.structureChanged();
+                ResultTable.setVisibleColumns(batchResultTable, true, columnsBatch);
+            }
         });
     }
 
@@ -2278,8 +2608,24 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         if (biomeCheckCheckBox != null) {
             biomeCheckCheckBox.setText(getString("check.biomeCheck"));
         }
+        if (searchMinAreaCheckBox != null) {
+            searchMinAreaCheckBox.setText(getString("check.minArea"));
+        }
+        if (searchSingleModeCheckBox != null) {
+            searchSingleModeCheckBox.setText(getString("check.modeSingle"));
+            searchDualModeCheckBox.setText(getString("check.modeDual"));
+            searchGateModeCheckBox.setText(getString("check.modeGate"));
+        }
         if (batchBiomeCheckCheckBox != null) {
             batchBiomeCheckCheckBox.setText(getString("check.biomeCheck"));
+        }
+        if (batchMinAreaCheckBox != null) {
+            batchMinAreaCheckBox.setText(getString("check.minArea"));
+        }
+        if (batchSingleModeCheckBox != null) {
+            batchSingleModeCheckBox.setText(getString("check.modeSingle"));
+            batchDualModeCheckBox.setText(getString("check.modeDual"));
+            batchGateModeCheckBox.setText(getString("check.modeGate"));
         }
         if (searchStartButton != null) searchStartButton.setText(getString("button.startSearch"));
         if (searchPauseButton != null && !isSearchPaused) {
@@ -2312,7 +2658,6 @@ public class DoubleMonumentForFixedSeed extends JFrame {
         if (batchVersionLabel != null) batchVersionLabel.setText(getString("label.mcVersion"));
         if (batchPairLevelLabel != null) batchPairLevelLabel.setText(getString("label.pairLevel"));
         if (batchPairLevelComboBox != null) fillPairLevelComboItems(batchPairLevelComboBox);
-        if (batchMinGroupAreaLabel != null) batchMinGroupAreaLabel.setText(getString("label.minGroupArea"));
         if (batchMinXLabel != null) batchMinXLabel.setText(getString("label.minX"));
         if (batchMaxXLabel != null) batchMaxXLabel.setText(getString("label.maxX"));
         if (batchMinZLabel != null) batchMinZLabel.setText(getString("label.minZ"));

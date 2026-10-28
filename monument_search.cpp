@@ -112,7 +112,16 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
     if (ctx.out->full())
         return;
 
-    // Early reject: group coverage <= sum_i min_{j!=i} U2(dist_ij); bound <= threshold means even the best AFK point falls short, skip exact computation.
+    const int modes = ctx.cfg.searchModes;   // which areas to compute
+    const int filterMode = ctx.cfg.filterMode; // which area the threshold applies to
+    const long long areaMin = ctx.cfg.minGroupArea; // 0 = area filter disabled
+
+    // the filter basis is always computed, even if its switch is off
+    const bool wantDual = (modes & 2) != 0 || filterMode == 1;
+    const bool wantGate = (modes & 4) != 0 || filterMode == 2;
+
+    // Early reject: group coverage <= sum_i min_{j!=i} U2(dist_ij). Only the filter basis may
+    // reject; the gate ceiling has no cheap bound, so it disables the prefilter.
     long long bound = 0;
     for (int i = 0; i < nn; i++) {
         int m = INT_MAX;
@@ -127,41 +136,13 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
         }
         bound += m;
     }
-    if (bound <= ctx.cfg.minGroupArea) {
-        return;
+    if (areaMin > 0) {
+        if (filterMode == 0 && bound <= areaMin)
+            return;
+        if (filterMode == 1 && 2 * bound <= areaMin)
+            return;
     }
 
-    int afkX = 0;
-    int afkZ = 0;
-    int groupArea = monument_afk_coverage(pts, nn, MONUMENT_BOX, MONUMENT_BOX, &afkX, &afkZ);
-
-    // Area must strictly exceed the threshold (== best-pair area = no gain, i.e. noise)
-    if (groupArea <= ctx.cfg.minGroupArea) {
-        return;
-    }
-
-    // Contribution filter: removing any member must strictly shrink the area, otherwise the group is effectively smaller (pseudo 3/4-group)
-    bool keep = true;
-    for (int skip = 0; skip < nn; skip++) {
-        MonumentBlockPos sub[3];
-        int m = 0;
-        for (int i = 0; i < nn; i++) {
-            if (i != skip)
-                sub[m++] = pts[i];
-        }
-        if (monument_afk_coverage(sub, nn - 1, MONUMENT_BOX, MONUMENT_BOX, nullptr,
-                                  nullptr) >= groupArea) {
-            keep = false;
-            break;
-        }
-    }
-    if (!keep) {
-        return;
-    }
-
-    PairHit hit;
-    hit.x = afkX;
-    hit.z = afkZ;
     int minX = pts[0].x, maxX = pts[0].x, minZ = pts[0].z, maxZ = pts[0].z;
     for (int i = 1; i < nn; i++) {
         minX = std::min(minX, pts[i].x);
@@ -169,11 +150,108 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
         minZ = std::min(minZ, pts[i].z);
         maxZ = std::max(maxZ, pts[i].z);
     }
+
+    // Single-dummy optimum: always computed (columns + dual baseline).
+    int afkX = 0, afkZ = 0;
+    int singleArea = monument_afk_coverage(pts, nn, MONUMENT_BOX, MONUMENT_BOX, &afkX, &afkZ);
+
+    // Dual-dummy area (expensive) when requested; a pseudo-group falls back to the single row.
+    bool dualBetter = false;
+    int dualArea = 0;
+    int dualX1 = 0, dualZ1 = 0, dualX2 = 0, dualZ2 = 0;
+    int dualSingleArea = 0, dualSingleX = 0, dualSingleZ = 0;
+    if (wantDual) {
+        dualArea = monument_afk_coverage_dual(pts, nn, MONUMENT_BOX, MONUMENT_BOX,
+                                              &dualX1, &dualZ1, &dualX2, &dualZ2,
+                                              &dualSingleArea, &dualSingleX, &dualSingleZ);
+        dualBetter = dualArea > singleArea;
+        if (dualBetter && nn >= 3) {
+            for (int skip = 0; skip < nn && dualBetter; skip++) {
+                MonumentBlockPos sub[3];
+                int m = 0;
+                long long subBound = 0;
+                for (int i = 0; i < nn; i++) {
+                    if (i == skip)
+                        continue;
+                    sub[m++] = pts[i];
+                }
+                for (int i = 0; i < m; i++) {
+                    int bm = INT_MAX;
+                    for (int j = 0; j < m; j++) {
+                        if (j == i)
+                            continue;
+                        int dx = std::abs(sub[i].x - sub[j].x);
+                        int dz = std::abs(sub[i].z - sub[j].z);
+                        int ub = monument_pair_upper_bound(dx, dz);
+                        if (ub < bm)
+                            bm = ub;
+                    }
+                    subBound += bm;
+                }
+                if (2 * subBound < dualArea)
+                    continue;
+                if (monument_afk_coverage_dual_reaches(sub, m, MONUMENT_BOX, MONUMENT_BOX, dualArea))
+                    dualBetter = false; // removed member adds nothing: pseudo-group
+            }
+        }
+    }
+
+    // Single-gate ceiling when requested.
+    int areaMax = 0, areaMaxX = 0, areaMaxZ = 0;
+    if (wantGate) {
+        areaMax = monument_group_max_area(pts, nn, MONUMENT_BOX, MONUMENT_BOX, &areaMaxX, &areaMaxZ);
+    }
+
+    // Acceptance: only the selected area type is compared against the threshold.
+    bool pass;
+    if (areaMin <= 0)
+        pass = true;
+    else if (filterMode == 0)
+        pass = singleArea > areaMin;
+    else if (filterMode == 1)
+        pass = dualBetter && dualArea > areaMin;
+    else
+        pass = areaMax > areaMin;
+    if (!pass)
+        return;
+
+    // the row always carries the ceiling column
+    if (areaMax == 0) {
+        areaMax = monument_group_max_area(pts, nn, MONUMENT_BOX, MONUMENT_BOX, &areaMaxX, &areaMaxZ);
+    }
+
+    PairHit hit;
+    if (dualBetter) {
+        hit.x = dualX1;
+        hit.z = dualZ1;
+        hit.x2 = dualX2;
+        hit.z2 = dualZ2;
+        hit.singleX = dualSingleX;
+        hit.singleZ = dualSingleZ;
+        hit.area = dualArea;
+        hit.singleArea = dualSingleArea;
+        hit.dual = true;
+    } else {
+        hit.x = afkX;
+        hit.z = afkZ;
+        hit.x2 = afkX;
+        hit.z2 = afkZ;
+        hit.singleX = afkX;
+        hit.singleZ = afkZ;
+        hit.area = singleArea;
+        hit.singleArea = singleArea;
+        hit.dual = false;
+    }
     hit.dx = maxX - minX;
     hit.dz = maxZ - minZ;
     hit.count = nn;
-    hit.area = groupArea;
+    hit.areaMax = areaMax;
+    hit.areaMaxX = areaMaxX;
+    hit.areaMaxZ = areaMaxZ;
     ctx.out->addResult(hit);
+
+    if (ctx.cfg.pauseOnPairFound && ctx.progress)
+        ctx.progress->try_pause = true;
 }
 
 void processChunk(
@@ -272,11 +350,20 @@ void processChunk(
                         PairHit hit;
                         hit.x = (p.x + q.x) / 2;
                         hit.z = (p.z + q.z) / 2;
+                        hit.x2 = hit.x;
+                        hit.z2 = hit.z;
+                        hit.singleX = hit.x;
+                        hit.singleZ = hit.z;
                         hit.dx = std::abs(q.x - p.x);
                         hit.dz = std::abs(q.z - p.z);
                         hit.count = 2;
                         hit.area = monument_afk_coverage(pair, 2, MONUMENT_BOX,
                                                          MONUMENT_BOX, nullptr, nullptr);
+                        hit.singleArea = hit.area;
+                        // pairs always fit one footprint, so this is 2*58*58
+                        hit.areaMax = monument_group_max_area(pair, 2, MONUMENT_BOX, MONUMENT_BOX,
+                                                              &hit.areaMaxX, &hit.areaMaxZ);
+                        hit.dual = false;
                         ctx.out->addResult(hit);
 
                         if (ctx.cfg.pauseOnPairFound && !check.isLowEfficiency &&
