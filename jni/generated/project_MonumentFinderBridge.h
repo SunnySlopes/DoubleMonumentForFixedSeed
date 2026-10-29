@@ -22,21 +22,27 @@ extern "C" {
 #undef project_MonumentFinderBridge_MC_26_2
 #define project_MonumentFinderBridge_MC_26_2 34L
 #undef project_MonumentFinderBridge_PAIR_STRIDE
-#define project_MonumentFinderBridge_PAIR_STRIDE 5L
+#define project_MonumentFinderBridge_PAIR_STRIDE 15L
+#undef project_MonumentFinderBridge_SEARCH_SINGLE
+#define project_MonumentFinderBridge_SEARCH_SINGLE 1L
+#undef project_MonumentFinderBridge_SEARCH_DUAL
+#define project_MonumentFinderBridge_SEARCH_DUAL 2L
+#undef project_MonumentFinderBridge_SEARCH_GATE
+#define project_MonumentFinderBridge_SEARCH_GATE 4L
 /*
  * Class:     project_MonumentFinderBridge
  * Method:    monumentSearch
- * Signature: (JIIIIIIZ)[I
+ * Signature: (JIIIIIIZIZIII)[I
  */
 JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_monumentSearch
-  (JNIEnv *, jclass, jlong, jint, jint, jint, jint, jint, jint, jboolean);
+  (JNIEnv *, jclass, jlong, jint, jint, jint, jint, jint, jint, jboolean, jint, jboolean, jint, jint, jint);
 
 /*
  * Class:     project_MonumentFinderBridge
  * Method:    getSearchProgress
- * Signature: ()[I
+ * Signature: ()[J
  */
-JNIEXPORT jintArray JNICALL Java_project_MonumentFinderBridge_getSearchProgress
+JNIEXPORT jlongArray JNICALL Java_project_MonumentFinderBridge_getSearchProgress
   (JNIEnv *, jclass);
 
 /*

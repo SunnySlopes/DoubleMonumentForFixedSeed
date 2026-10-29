@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
- * Monument pair search via JNI ({@link MonumentFinderBridge}).
+ * Monument group search via JNI ({@link MonumentFinderBridge}).
  */
 public class MonumentSearchRunner {
 
@@ -28,27 +28,14 @@ public class MonumentSearchRunner {
             boolean pauseOnPairFound) {
     }
 
-    public static class ProgressInfo {
-        public final long processed;
-        public final long total;
-        public final double percentage;
-        public final long elapsedMs;
-        public final long remainingMs;
-
-        public ProgressInfo(long processed, long total, double percentage, long elapsedMs, long remainingMs) {
-            this.processed = processed;
-            this.total = total;
-            this.percentage = percentage;
-            this.elapsedMs = elapsedMs;
-            this.remainingMs = remainingMs;
-        }
+    public record ProgressInfo(long processed, long total, double percentage, long elapsedMs, long remainingMs) {
     }
 
     private final int mc;
     private volatile boolean isRunning = false;
     private volatile boolean isPaused = false;
     private volatile long runStartTimeMs = 0;
-    private volatile long totalPausedMs = 0;
+    private final AtomicLong totalPausedMs = new AtomicLong();
     private volatile long pauseStartMs = 0;
     private final List<String> results = new ArrayList<>();
     private final Set<String> emittedResults = new HashSet<>();
@@ -90,7 +77,7 @@ public class MonumentSearchRunner {
     public void resume() {
         if (isPaused) {
             if (pauseStartMs > 0) {
-                totalPausedMs += System.currentTimeMillis() - pauseStartMs;
+                totalPausedMs.addAndGet(System.currentTimeMillis() - pauseStartMs);
                 pauseStartMs = 0;
             }
             isPaused = false;
@@ -112,7 +99,7 @@ public class MonumentSearchRunner {
 
     private long getElapsedMs() {
         long base = System.currentTimeMillis() - runStartTimeMs;
-        long paused = totalPausedMs;
+        long paused = totalPausedMs.get();
         if (pauseStartMs > 0) {
             paused += System.currentTimeMillis() - pauseStartMs;
         }
@@ -129,11 +116,17 @@ public class MonumentSearchRunner {
             Consumer<ProgressInfo> progressCallback,
             Consumer<String> resultCallback,
             boolean pauseOnPairFound,
+            boolean biomeCheck,
+            int pairLevel,
+            int minGroupArea,
+            int searchModes,
+            int filterMode,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
         if (isRunning && isPaused && threadCount > 0) {
             restartWithNewThreadCount(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback,
-                    resultCallback, pauseOnPairFound, resultFormatter, nativeErrorMessage);
+                    resultCallback, pauseOnPairFound, biomeCheck, pairLevel, minGroupArea, searchModes, filterMode,
+                    resultFormatter, nativeErrorMessage);
             return;
         }
         if (isRunning) {
@@ -142,7 +135,7 @@ public class MonumentSearchRunner {
 
         Thread t = new Thread(
                 () -> runSearch(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback, resultCallback,
-                        pauseOnPairFound, resultFormatter, nativeErrorMessage),
+                        pauseOnPairFound, biomeCheck, pairLevel, minGroupArea, searchModes, filterMode, resultFormatter, nativeErrorMessage),
                 "monument-search");
         t.setDaemon(true);
         searchThread = t;
@@ -150,7 +143,7 @@ public class MonumentSearchRunner {
     }
 
     /**
-     * Runs search on the calling thread (for batch/list search workers).
+     * Runs the search on the calling thread (for batch/list search workers).
      */
     public void runSearchBlocking(
             long seed,
@@ -162,16 +155,23 @@ public class MonumentSearchRunner {
             Consumer<ProgressInfo> progressCallback,
             Consumer<String> resultCallback,
             boolean pauseOnPairFound,
+            boolean biomeCheck,
+            int pairLevel,
+            int minGroupArea,
+            int searchModes,
+            int filterMode,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
         if (isRunning) {
             return;
         }
         runSearch(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback, resultCallback,
-                pauseOnPairFound, resultFormatter, nativeErrorMessage);
+                pauseOnPairFound, biomeCheck, pairLevel, minGroupArea, searchModes, filterMode, resultFormatter, nativeErrorMessage);
     }
 
-    /** Blocks until the async search thread from {@link #startSearch} finishes. */
+    /**
+     * Blocks until the async search thread from {@link #startSearch} finishes.
+     */
     public void awaitSearchFinished() throws InterruptedException {
         Thread t = searchThread;
         if (t != null) {
@@ -189,6 +189,11 @@ public class MonumentSearchRunner {
             Consumer<ProgressInfo> progressCallback,
             Consumer<String> resultCallback,
             boolean pauseOnPairFound,
+            boolean biomeCheck,
+            int pairLevel,
+            int minGroupArea,
+            int searchModes,
+            int filterMode,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
         stop();
@@ -201,7 +206,7 @@ public class MonumentSearchRunner {
         isRunning = false;
         isPaused = false;
         startSearch(seed, threadCount, minX, maxX, minZ, maxZ, progressCallback, resultCallback,
-                pauseOnPairFound, resultFormatter, nativeErrorMessage);
+                pauseOnPairFound, biomeCheck, pairLevel, minGroupArea, searchModes, filterMode, resultFormatter, nativeErrorMessage);
     }
 
     private void runSearch(
@@ -214,11 +219,16 @@ public class MonumentSearchRunner {
             Consumer<ProgressInfo> progressCallback,
             Consumer<String> resultCallback,
             boolean pauseOnPairFound,
+            boolean biomeCheck,
+            int pairLevel,
+            int minGroupArea,
+            int searchModes,
+            int filterMode,
             PairResultFormatter resultFormatter,
             String nativeErrorMessage) {
         isRunning = true;
         isPaused = false;
-        totalPausedMs = 0;
+        totalPausedMs.set(0);
         pauseStartMs = 0;
         runStartTimeMs = System.currentTimeMillis();
 
@@ -239,77 +249,74 @@ public class MonumentSearchRunner {
         AtomicLong lastProcessed = new AtomicLong(0);
         AtomicLong lastTotal = new AtomicLong(Math.max(1, totalTasks));
 
-        ScheduledExecutorService progressScheduler = Executors.newSingleThreadScheduledExecutor(task -> {
-            Thread pt = new Thread(task, "monument-progress");
-            pt.setDaemon(true);
-            return pt;
-        });
+        try (CloseableScheduler progressScheduler = new CloseableScheduler(
+                Executors.newSingleThreadScheduledExecutor(task -> {
+                    Thread pt = new Thread(task, "monument-progress");
+                    pt.setDaemon(true);
+                    return pt;
+                }))) {
 
-        if (progressCallback != null && totalTasks > 0) {
-            progressCallback.accept(new ProgressInfo(0, totalTasks, 0, getElapsedMs(), 0));
-        }
-
-        progressScheduler.scheduleAtFixedRate(() -> {
-            if (!isRunning) {
-                return;
+            if (progressCallback != null && totalTasks > 0) {
+                progressCallback.accept(new ProgressInfo(0, totalTasks, 0, getElapsedMs(), 0));
             }
-            try {
-                pollIncrementalResults(resultCallback, resultFormatter);
 
-                if (progressCallback != null) {
-                    int[] arr = MonumentFinderBridge.getSearchProgress();
-                    long processed;
-                    long total;
-                    if (arr != null && arr.length >= 2) {
-                        processed = arr[0];
-                        total = Math.max(arr[1], 1L);
-                        lastProcessed.set(processed);
-                        lastTotal.set(total);
-                    } else {
-                        processed = lastProcessed.get();
-                        total = lastTotal.get();
-                    }
-                    long elapsed = getElapsedMs();
-                    long remaining = 0;
-                    if (!isPaused && total > processed && processed > 0) {
-                        remaining = elapsed * (total - processed) / processed;
-                    }
-                    double pct = total > 0 ? processed * 100.0 / total : 0;
-                    progressCallback.accept(new ProgressInfo(processed, total, pct, elapsed, remaining));
+            progressScheduler.executor.scheduleAtFixedRate(() -> {
+                if (!isRunning) {
+                    return;
                 }
-            } catch (Throwable ignored) {
-            }
-        }, 0, PROGRESS_POLL_MS, TimeUnit.MILLISECONDS);
+                try {
+                    pollIncrementalResults(resultCallback, resultFormatter);
 
-        try {
-            int[] raw = MonumentFinderBridge.monumentSearch(
-                    seed, minX, maxX, minZ, maxZ, mc, threads, pauseOnPairFound);
-            pollIncrementalResults(resultCallback, resultFormatter);
-            if (raw != null) {
-                emitRawResults(raw, resultCallback, resultFormatter);
-            }
-        } catch (UnsatisfiedLinkError e) {
-            String msg = (nativeErrorMessage != null ? nativeErrorMessage : "Native library not loaded")
-                    + " " + e.getMessage();
-            if (resultCallback != null) {
-                resultCallback.accept(msg);
-            }
-            synchronized (results) {
-                results.add(msg);
+                    if (progressCallback != null) {
+                        long[] arr = MonumentFinderBridge.getSearchProgress();
+                        long processed;
+                        long total;
+                        if (arr != null && arr.length >= 2) {
+                            processed = arr[0];
+                            total = Math.max(arr[1], 1L);
+                            lastProcessed.set(processed);
+                            lastTotal.set(total);
+                        } else {
+                            processed = lastProcessed.get();
+                            total = lastTotal.get();
+                        }
+                        if (total > 0 && processed >= total) {
+                            processed = total - 1;
+                        }
+                        long elapsed = getElapsedMs();
+                        long remaining = 0;
+                        if (!isPaused && total > processed && processed > 0) {
+                            remaining = elapsed * (total - processed) / processed;
+                        }
+                        double pct = total > 0 ? processed * 100.0 / total : 0;
+                        progressCallback.accept(new ProgressInfo(processed, total, pct, elapsed, remaining));
+                    }
+                } catch (Throwable ignored) {
+                }
+            }, 0, PROGRESS_POLL_MS, TimeUnit.MILLISECONDS);
+
+            try {
+                int[] raw = MonumentFinderBridge.monumentSearch(
+                        seed, minX, maxX, minZ, maxZ, mc, threads, pauseOnPairFound, pairLevel,
+                        biomeCheck, minGroupArea, searchModes, filterMode);
+                pollIncrementalResults(resultCallback, resultFormatter);
+                if (raw != null) {
+                    emitRawResults(raw, resultCallback, resultFormatter);
+                }
+            } catch (UnsatisfiedLinkError e) {
+                String msg = (nativeErrorMessage != null ? nativeErrorMessage : "Native library not loaded")
+                        + " " + e.getMessage();
+                if (resultCallback != null) {
+                    resultCallback.accept(msg);
+                }
+                synchronized (results) {
+                    results.add(msg);
+                }
             }
         } finally {
-            progressScheduler.shutdown();
-            try {
-                if (!progressScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                    progressScheduler.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                progressScheduler.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
             isRunning = false;
             if (pauseStartMs > 0) {
-                totalPausedMs += System.currentTimeMillis() - pauseStartMs;
+                totalPausedMs.addAndGet(System.currentTimeMillis() - pauseStartMs);
                 pauseStartMs = 0;
             }
             isPaused = false;
@@ -340,12 +347,23 @@ public class MonumentSearchRunner {
             return;
         }
         for (int i = 0; i + MonumentFinderBridge.PAIR_STRIDE <= raw.length; i += MonumentFinderBridge.PAIR_STRIDE) {
-            int hangX = raw[i];
-            int hangZ = raw[i + 1];
-            int dx = raw[i + 2];
-            int dz = raw[i + 3];
-            boolean low = raw[i + 4] != 0;
-            String line = resultFormatter.format(hangX, hangZ, dx, dz, low);
+            int x = raw[i];
+            int z = raw[i + 1];
+            int x2 = raw[i + 2];
+            int z2 = raw[i + 3];
+            int sx = raw[i + 4];
+            int sz = raw[i + 5];
+            int dx = raw[i + 6];
+            int dz = raw[i + 7];
+            int count = raw[i + 8];
+            int area = raw[i + 9];
+            int singleArea = raw[i + 10];
+            int areaMax = raw[i + 11];
+            int areaMaxX = raw[i + 12];
+            int areaMaxZ = raw[i + 13];
+            boolean dual = raw[i + 14] != 0;
+            String line = resultFormatter.format(x, z, x2, z2, sx, sz, count, area, singleArea,
+                    areaMax, areaMaxX, areaMaxZ, dx, dz, dual);
             synchronized (emittedResults) {
                 if (!emittedResults.add(line)) {
                     continue;
@@ -359,4 +377,20 @@ public class MonumentSearchRunner {
             }
         }
     }
+
+    private record CloseableScheduler(ScheduledExecutorService executor) implements AutoCloseable {
+
+        @Override
+            public void close() {
+                executor.shutdown();
+                try {
+                    if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                        executor.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    executor.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
 }

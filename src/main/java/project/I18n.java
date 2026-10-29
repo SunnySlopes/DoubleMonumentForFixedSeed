@@ -56,24 +56,32 @@ public final class I18n {
         }
     }
 
-    public static String formatPair(int hangX, int hangZ, int dx, int dz, boolean lowEfficiency) {
-        return formatPair(hangX, hangZ, dx, dz, lowEfficiency, null);
-    }
-
-    public static String formatPair(int hangX, int hangZ, int dx, int dz, boolean lowEfficiency, String oceanTypeKey) {
-        // Use Locale.ROOT so coordinates never get thousand-separator commas (e.g. -1,024).
-        String base;
-        if (oceanTypeKey != null && !oceanTypeKey.isEmpty()) {
-            String typeLabel = get("result.oceanType." + oceanTypeKey);
-            MessageFormat mf = new MessageFormat(messages.getString("result.tpFormatWithType"), Locale.ROOT);
-            base = mf.format(new Object[] {hangX, hangZ, typeLabel, dx, dz});
-        } else {
-            MessageFormat mf = new MessageFormat(messages.getString("result.tpFormat"), Locale.ROOT);
-            base = mf.format(new Object[] {hangX, hangZ, dx, dz});
-        }
-        if (lowEfficiency) {
-            return base + get("result.lowEfficiencySuffix");
-        }
-        return base;
+    /**
+     * Builds one result record (cells in {@link ResultTable#KEYS} order, tab separated).
+     *
+     * <p>Cells: seed, optimal single-dummy point, optimal single-dummy area, ocean type,
+     * group size (2/3/4), dummy 1 point, dummy 2 point (dual mode only, "-" otherwise), reported
+     * dual-dummy area (dual mode only, "-" otherwise), single-gate area ceiling, nether portal
+     * coordinates of that ceiling (overworld centre / 8). Points are plain "x z" coordinates;
+     * there are no {@code /tp} prefixes, labels or brackets - the header row carries the names.</p>
+     *
+     * @param oceanTypeKey nullable biome type key (null/empty renders as "-")
+     * @param areaMaxX     overworld centre of the ceiling footprint (portal / gate location)
+     * @param areaMaxZ     overworld centre of the ceiling footprint (portal / gate location)
+     */
+    public static String formatRow(long seed, int x, int z, int x2, int z2, int sx, int sz,
+                                   int count, int area, int singleArea, int areaMax,
+                                   int areaMaxX, int areaMaxZ, boolean dual,
+                                   String oceanTypeKey) {
+        String ocean = (oceanTypeKey == null || oceanTypeKey.isEmpty())
+                ? "-" : get("result.oceanType." + oceanTypeKey);
+        String singlePoint = sx + " " + sz;
+        String d1 = x + " " + z;
+        String d2 = dual ? x2 + " " + z2 : "-";
+        String dualArea = dual ? String.valueOf(area) : "-";
+        // nether side of the single gate: overworld coordinates / 8 (floor division)
+        String gate = (areaMaxX >> 3) + " " + (areaMaxZ >> 3);
+        return String.join("\t", String.valueOf(seed), singlePoint, String.valueOf(singleArea),
+                ocean, String.valueOf(count), d1, d2, dualArea, String.valueOf(areaMax), gate);
     }
 }

@@ -13,11 +13,28 @@ template<typename T>
 class ThreadSafeResults {
     std::priority_queue<T> results_;
     mutable std::mutex mutex_{};
+    // Result cap (0 = unbounded). Geometry-only searches produce huge candidate volumes; once full, new results are dropped and expensive computation skipped to prevent OOM.
+    size_t limit_ = 0;
 
 public:
+    void setLimit(size_t limit)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        limit_ = limit;
+    }
+
+    // true when the queue has reached its cap (caller can skip expensive computation)
+    bool full() const
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return limit_ != 0 && results_.size() >= limit_;
+    }
+
     void addResult(const T &res)
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (limit_ != 0 && results_.size() >= limit_)
+            return;
         results_.emplace(res);
     }
 

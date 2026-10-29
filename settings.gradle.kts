@@ -1,1 +1,1 @@
-rootProject.name = "DoubleMonumentForFixedSeed"
+rootProject.name = "MultiMonumentFinder"

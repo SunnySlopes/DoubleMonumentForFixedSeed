@@ -6,10 +6,8 @@
 #include <algorithm>
 #include <chrono>
 #include <climits>
-#include <cmath>
-#include <mutex>
+#include <cstdlib>
 #include <thread>
-#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -24,6 +22,7 @@ struct PairCheckResult {
     bool isLowEfficiency = false;
 };
 
+// No global monument list: grouping is decided inside the chunk window only; global hash tables caused OOM/stalls on huge searches.
 struct SearchContext {
     MonumentSearchConfig cfg;
     Progress *progress = nullptr;
@@ -31,37 +30,12 @@ struct SearchContext {
 
     int centerRegX = 0;
     int centerRegZ = 0;
-    int searchMinX = 0;
-    int searchMaxX = 0;
-    int searchMinZ = 0;
-    int searchMaxZ = 0;
-
-    std::vector<std::pair<int, int>> regions;
-    std::mutex monumentsMu;
-    std::unordered_set<uint64_t> monumentKeys;
-    std::vector<MonumentPos> monuments;
-    std::mutex pairsMu;
-    std::unordered_set<uint64_t> addedPairKeys;
 };
 
 int defaultHwThreads()
 {
     unsigned hw = std::thread::hardware_concurrency();
     return hw > 0 ? (int) hw : 1;
-}
-
-uint64_t posKey(int x, int z)
-{
-    return ((uint64_t) (uint32_t) x << 32) | (uint32_t) z;
-}
-
-uint64_t pairKey(int x1, int z1, int x2, int z2)
-{
-    int minX = std::min(x1, x2);
-    int minZ = std::min(z1, z2);
-    int maxX = std::max(x1, x2);
-    int maxZ = std::max(z1, z2);
-    return (posKey(minX, minZ) << 1) ^ posKey(maxX, maxZ);
 }
 
 bool checkProgress(Progress *progress)
@@ -110,119 +84,366 @@ PairCheckResult checkCanFormPair(const MonumentPos &pos1, const MonumentPos &pos
     return {false, false};
 }
 
-bool isInSearchRange(const SearchContext &ctx, const MonumentPos &pos)
+// Box-sharing centre distance bound: 2*128 + 58*sqrt(2) ~338; largest valid 16-aligned pair ~334 (dx=272,dz=192), so 336 is safe and tight.
+constexpr int GROUP_LINK_DIST_SQ = 336 * 336;
+constexpr int MONUMENT_BOX = 58;
+
+// ==================== geometry-first chunk scan ====================
+
+// Chunk size in regions. RNG generates chunk+halo positions cheaply; expensive sampling runs only on pre-screened candidates. Dedup: group members are pairwise <= 336 < 512, so the group lies in the window of the chunk holding its lexicographically smallest in-range member; emit once there, border groups covered by halo.
+constexpr int CHUNK = 64;
+
+inline bool lexLessPos(int ax, int az, int bx, int bz)
 {
-    return pos.x >= ctx.searchMinX && pos.x < ctx.searchMaxX && pos.z >= ctx.searchMinZ &&
-           pos.z < ctx.searchMaxZ;
+    return ax != bx ? ax < bx : az < bz;
 }
 
-void addPairResult(SearchContext &ctx, const MonumentPos &pos1, const MonumentPos &pos2, bool lowEfficiency)
+// Group adjacency: centre distance <= 336 (RNG positions are always 16-aligned)
+inline bool groupLinked(const MonumentBlockPos &a, const MonumentBlockPos &b)
 {
-    uint64_t key = pairKey(pos1.x, pos1.z, pos2.x, pos2.z);
-    {
-        std::lock_guard<std::mutex> lock(ctx.pairsMu);
-        if (!ctx.addedPairKeys.insert(key).second)
+    long long adx = a.x > b.x ? (long long) a.x - b.x : (long long) b.x - a.x;
+    long long adz = a.z > b.z ? (long long) a.z - b.z : (long long) b.z - a.z;
+    return adx * adx + adz * adz <= GROUP_LINK_DIST_SQ;
+}
+
+void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
+{
+    // Skip expensive work once the result queue is full (geometry-only searches produce astronomically many candidates)
+    if (ctx.out->full())
+        return;
+
+    const int modes = ctx.cfg.searchModes;   // which areas to compute
+    const int filterMode = ctx.cfg.filterMode; // which area the threshold applies to
+    const long long areaMin = ctx.cfg.minGroupArea; // 0 = area filter disabled
+
+    // the filter basis is always computed, even if its switch is off
+    const bool wantDual = (modes & 2) != 0 || filterMode == 1;
+    const bool wantGate = (modes & 4) != 0 || filterMode == 2;
+
+    // Early reject: group coverage <= sum_i min_{j!=i} U2(dist_ij). Only the filter basis may
+    // reject; the gate ceiling has no cheap bound, so it disables the prefilter.
+    long long bound = 0;
+    for (int i = 0; i < nn; i++) {
+        int m = INT_MAX;
+        for (int j = 0; j < nn; j++) {
+            if (j == i)
+                continue;
+            int dx = std::abs(pts[i].x - pts[j].x);
+            int dz = std::abs(pts[i].z - pts[j].z);
+            int ub = monument_pair_upper_bound(dx, dz);
+            if (ub < m)
+                m = ub;
+        }
+        bound += m;
+    }
+    if (areaMin > 0) {
+        if (filterMode == 0 && bound <= areaMin)
+            return;
+        if (filterMode == 1 && 2 * bound <= areaMin)
             return;
     }
 
+    int minX = pts[0].x, maxX = pts[0].x, minZ = pts[0].z, maxZ = pts[0].z;
+    for (int i = 1; i < nn; i++) {
+        minX = std::min(minX, pts[i].x);
+        maxX = std::max(maxX, pts[i].x);
+        minZ = std::min(minZ, pts[i].z);
+        maxZ = std::max(maxZ, pts[i].z);
+    }
+
+    // Single-dummy optimum: always computed (columns + dual baseline).
+    int afkX = 0, afkZ = 0;
+    int singleArea = monument_afk_coverage(pts, nn, MONUMENT_BOX, MONUMENT_BOX, &afkX, &afkZ);
+
+    // Dual-dummy area (expensive) when requested; a pseudo-group falls back to the single row.
+    bool dualBetter = false;
+    int dualArea = 0;
+    int dualX1 = 0, dualZ1 = 0, dualX2 = 0, dualZ2 = 0;
+    int dualSingleArea = 0, dualSingleX = 0, dualSingleZ = 0;
+    if (wantDual) {
+        dualArea = monument_afk_coverage_dual(pts, nn, MONUMENT_BOX, MONUMENT_BOX,
+                                              &dualX1, &dualZ1, &dualX2, &dualZ2,
+                                              &dualSingleArea, &dualSingleX, &dualSingleZ);
+        dualBetter = dualArea > singleArea;
+        if (dualBetter && nn >= 3) {
+            for (int skip = 0; skip < nn && dualBetter; skip++) {
+                MonumentBlockPos sub[3];
+                int m = 0;
+                long long subBound = 0;
+                for (int i = 0; i < nn; i++) {
+                    if (i == skip)
+                        continue;
+                    sub[m++] = pts[i];
+                }
+                for (int i = 0; i < m; i++) {
+                    int bm = INT_MAX;
+                    for (int j = 0; j < m; j++) {
+                        if (j == i)
+                            continue;
+                        int dx = std::abs(sub[i].x - sub[j].x);
+                        int dz = std::abs(sub[i].z - sub[j].z);
+                        int ub = monument_pair_upper_bound(dx, dz);
+                        if (ub < bm)
+                            bm = ub;
+                    }
+                    subBound += bm;
+                }
+                if (2 * subBound < dualArea)
+                    continue;
+                if (monument_afk_coverage_dual_reaches(sub, m, MONUMENT_BOX, MONUMENT_BOX, dualArea))
+                    dualBetter = false; // removed member adds nothing: pseudo-group
+            }
+        }
+    }
+
+    // Single-gate ceiling when requested.
+    int areaMax = 0, areaMaxX = 0, areaMaxZ = 0;
+    if (wantGate) {
+        areaMax = monument_group_max_area(pts, nn, MONUMENT_BOX, MONUMENT_BOX, &areaMaxX, &areaMaxZ);
+    }
+
+    // Acceptance: only the selected area type is compared against the threshold.
+    bool pass;
+    if (areaMin <= 0)
+        pass = true;
+    else if (filterMode == 0)
+        pass = singleArea > areaMin;
+    else if (filterMode == 1)
+        pass = dualBetter && dualArea > areaMin;
+    else
+        pass = areaMax > areaMin;
+    if (!pass)
+        return;
+
+    // the row always carries the ceiling column
+    if (areaMax == 0) {
+        areaMax = monument_group_max_area(pts, nn, MONUMENT_BOX, MONUMENT_BOX, &areaMaxX, &areaMaxZ);
+    }
+
     PairHit hit;
-    hit.hangX = (pos1.x + pos2.x) / 2;
-    hit.hangZ = (pos1.z + pos2.z) / 2;
-    hit.dx = std::abs(pos2.x - pos1.x);
-    hit.dz = std::abs(pos2.z - pos1.z);
-    hit.lowEfficiency = lowEfficiency ? 1 : 0;
+    if (dualBetter) {
+        hit.x = dualX1;
+        hit.z = dualZ1;
+        hit.x2 = dualX2;
+        hit.z2 = dualZ2;
+        hit.singleX = dualSingleX;
+        hit.singleZ = dualSingleZ;
+        hit.area = dualArea;
+        hit.singleArea = dualSingleArea;
+        hit.dual = true;
+    } else {
+        hit.x = afkX;
+        hit.z = afkZ;
+        hit.x2 = afkX;
+        hit.z2 = afkZ;
+        hit.singleX = afkX;
+        hit.singleZ = afkZ;
+        hit.area = singleArea;
+        hit.singleArea = singleArea;
+        hit.dual = false;
+    }
+    hit.dx = maxX - minX;
+    hit.dz = maxZ - minZ;
+    hit.count = nn;
+    hit.areaMax = areaMax;
+    hit.areaMaxX = areaMaxX;
+    hit.areaMaxZ = areaMaxZ;
     ctx.out->addResult(hit);
 
-    if (ctx.cfg.pauseOnPairFound && !lowEfficiency && ctx.progress) {
+    if (ctx.cfg.pauseOnPairFound && ctx.progress)
         ctx.progress->try_pause = true;
-    }
 }
 
-void checkPairsWithOutsidePositions(
+void processChunk(
     SearchContext &ctx,
     MonumentGenerator *g,
-    const MonumentPos &inRangePos)
+    int bx,
+    int bz,
+    int bw,
+    int bh,
+    long long *cellsOut)
 {
-    for (int dx = -192; dx <= 192; dx += 16) {
-        for (int dz = -192; dz <= 192; dz += 16) {
-            if (dx == 0 && dz == 0)
+    const int W = CHUNK + 2;
+    struct RegionPos {
+        bool ok = false;
+        int x = 0;
+        int z = 0;
+    };
+    std::vector<RegionPos> win((size_t) W * W);
+    // Viability memo: 0=unsampled 1=viable 2=not (always viable without biome check)
+    std::vector<uint8_t> viable((size_t) W * W, 0);
+
+    auto viableAt = [&](int lx, int lz) -> bool {
+        uint8_t &v = viable[(size_t) lx * W + lz];
+        if (v == 0) {
+            const RegionPos &p = win[(size_t) lx * W + lz];
+            if (!p.ok) {
+                v = 2;
+            } else if (!ctx.cfg.biomeCheck) {
+                v = 1;
+            } else {
+                int mx = 0;
+                int mz = 0;
+                v = monument_try_region_g(g, ctx.cfg.mc, ctx.cfg.seed, bx - 1 + lx,
+                                          bz - 1 + lz, &mx, &mz)
+                        ? 1
+                        : 2;
+            }
+        }
+        return v == 1;
+    };
+
+    auto inRange = [&](int lx, int lz) -> bool {
+        int regX = bx - 1 + lx;
+        int regZ = bz - 1 + lz;
+        return regX >= ctx.cfg.minX && regX < ctx.cfg.maxX && regZ >= ctx.cfg.minZ &&
+               regZ < ctx.cfg.maxZ;
+    };
+
+    // Structure positions for chunk + halo (RNG only); halo may cross the search border so border-straddling groups are seen whole
+    for (int lx = 0; lx < W; lx++) {
+        for (int lz = 0; lz < W; lz++) {
+            RegionPos &dst = win[(size_t) lx * W + lz];
+            int px = 0;
+            int pz = 0;
+            if (monument_region_pos(ctx.cfg.seed, ctx.cfg.mc, bx - 1 + lx, bz - 1 + lz,
+                                    &px, &pz)) {
+                dst.ok = true;
+                dst.x = px;
+                dst.z = pz;
+            }
+        }
+    }
+
+    const int level = ctx.cfg.pairLevel;
+
+    for (int lx = 1; lx <= bw; lx++) {
+        for (int lz = 1; lz <= bh; lz++) {
+            (*cellsOut)++;
+            const RegionPos &p = win[(size_t) lx * W + lz];
+            if (!p.ok)
                 continue;
 
-            int otherX = inRangePos.x + dx;
-            int otherZ = inRangePos.z + dz;
+            if (level == 2) {
+                // pair: pair only with out-of-range or lexicographically greater in-range neighbours, so each pair is emitted exactly once
+                for (int dx = -1; dx <= 1; dx++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        if (dx == 0 && dz == 0)
+                            continue;
+                        int nx = lx + dx;
+                        int nz = lz + dz;
+                        const RegionPos &q = win[(size_t) nx * W + nz];
+                        if (!q.ok)
+                            continue;
+                        if (inRange(nx, nz) && !lexLessPos(p.x, p.z, q.x, q.z))
+                            continue;
+                        PairCheckResult check =
+                            checkCanFormPair(MonumentPos{p.x, p.z}, MonumentPos{q.x, q.z});
+                        if (!check.canFormPair)
+                            continue;
+                        if (!viableAt(lx, lz) || !viableAt(nx, nz))
+                            continue;
+                        if (ctx.out->full())
+                            return;
 
-            if (otherX >= ctx.searchMinX && otherX < ctx.searchMaxX && otherZ >= ctx.searchMinZ &&
-                otherZ < ctx.searchMaxZ) {
+                        MonumentBlockPos pair[2] = {{p.x, p.z}, {q.x, q.z}};
+                        PairHit hit;
+                        hit.x = (p.x + q.x) / 2;
+                        hit.z = (p.z + q.z) / 2;
+                        hit.x2 = hit.x;
+                        hit.z2 = hit.z;
+                        hit.singleX = hit.x;
+                        hit.singleZ = hit.z;
+                        hit.dx = std::abs(q.x - p.x);
+                        hit.dz = std::abs(q.z - p.z);
+                        hit.count = 2;
+                        hit.area = monument_afk_coverage(pair, 2, MONUMENT_BOX,
+                                                         MONUMENT_BOX, nullptr, nullptr);
+                        hit.singleArea = hit.area;
+                        // pairs always fit one footprint, so this is 2*58*58
+                        hit.areaMax = monument_group_max_area(pair, 2, MONUMENT_BOX, MONUMENT_BOX,
+                                                              &hit.areaMaxX, &hit.areaMaxZ);
+                        hit.dual = false;
+                        ctx.out->addResult(hit);
+
+                        if (ctx.cfg.pauseOnPairFound && !check.isLowEfficiency &&
+                            ctx.progress) {
+                            ctx.progress->try_pause = true;
+                        }
+                    }
+                }
                 continue;
             }
 
-            MonumentPos otherPos{otherX, otherZ};
-            PairCheckResult check = checkCanFormPair(inRangePos, otherPos);
-            if (!check.canFormPair)
-                continue;
-
-            int actualX = 0, actualZ = 0;
-            if (!monument_exists_at_block_g(
-                    g, ctx.cfg.mc, ctx.cfg.seed, otherX, otherZ, &actualX, &actualZ)) {
-                continue;
+            // 3/4: c must be the lexicographically smallest in-range member
+            struct Member {
+                MonumentBlockPos pos;
+                int lx;
+                int lz;
+            };
+            Member nbrs[8];
+            int nn = 0;
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dz == 0)
+                        continue;
+                    int nx = lx + dx;
+                    int nz = lz + dz;
+                    const RegionPos &q = win[(size_t) nx * W + nz];
+                    if (!q.ok)
+                        continue;
+                    if (inRange(nx, nz) && !lexLessPos(p.x, p.z, q.x, q.z))
+                        continue;
+                    if (!groupLinked(MonumentBlockPos{p.x, p.z}, MonumentBlockPos{q.x, q.z}))
+                        continue;
+                    nbrs[nn].pos = MonumentBlockPos{q.x, q.z};
+                    nbrs[nn].lx = nx;
+                    nbrs[nn].lz = nz;
+                    nn++;
+                }
             }
-
-            MonumentPos actual{actualX, actualZ};
-            addPairResult(ctx, inRangePos, actual, check.isLowEfficiency);
-        }
-    }
-}
-
-void checkPairsIncremental(SearchContext &ctx, MonumentGenerator *g, const MonumentPos &newPos)
-{
-    std::vector<MonumentPos> snapshot;
-    {
-        std::lock_guard<std::mutex> lock(ctx.monumentsMu);
-        snapshot.reserve(ctx.monuments.size());
-        for (const MonumentPos &p : ctx.monuments) {
-            if (p.x == newPos.x && p.z == newPos.z)
+            if (nn < level - 1)
                 continue;
-            snapshot.push_back(p);
+
+            MonumentBlockPos pts[4];
+            pts[0] = MonumentBlockPos{p.x, p.z};
+
+            if (level == 3) {
+                for (int i = 0; i < nn; i++) {
+                    for (int j = i + 1; j < nn; j++) {
+                        if (!groupLinked(nbrs[i].pos, nbrs[j].pos))
+                            continue;
+                        if (!viableAt(lx, lz) || !viableAt(nbrs[i].lx, nbrs[i].lz) ||
+                            !viableAt(nbrs[j].lx, nbrs[j].lz))
+                            continue;
+                        pts[1] = nbrs[i].pos;
+                        pts[2] = nbrs[j].pos;
+                        emitGroup(ctx, pts, 3);
+                    }
+                }
+            } else { // level == 4
+                for (int i = 0; i < nn; i++) {
+                    for (int j = i + 1; j < nn; j++) {
+                        if (!groupLinked(nbrs[i].pos, nbrs[j].pos))
+                            continue;
+                        for (int k = j + 1; k < nn; k++) {
+                            if (!groupLinked(nbrs[i].pos, nbrs[k].pos) ||
+                                !groupLinked(nbrs[j].pos, nbrs[k].pos))
+                                continue;
+                            if (!viableAt(lx, lz) || !viableAt(nbrs[i].lx, nbrs[i].lz) ||
+                                !viableAt(nbrs[j].lx, nbrs[j].lz) ||
+                                !viableAt(nbrs[k].lx, nbrs[k].lz))
+                                continue;
+                            pts[1] = nbrs[i].pos;
+                            pts[2] = nbrs[j].pos;
+                            pts[3] = nbrs[k].pos;
+                            emitGroup(ctx, pts, 4);
+                        }
+                    }
+                }
+            }
         }
     }
-
-    for (const MonumentPos &p : snapshot) {
-        PairCheckResult check = checkCanFormPair(newPos, p);
-        if (check.canFormPair)
-            addPairResult(ctx, newPos, p, check.isLowEfficiency);
-    }
-
-    if (isInSearchRange(ctx, newPos))
-        checkPairsWithOutsidePositions(ctx, g, newPos);
-}
-
-void tryAddMonument(SearchContext &ctx, MonumentGenerator *g, int monumentX, int monumentZ)
-{
-    MonumentPos pos{monumentX, monumentZ};
-    uint64_t key = posKey(monumentX, monumentZ);
-    bool isNew = false;
-    {
-        std::lock_guard<std::mutex> lock(ctx.monumentsMu);
-        if (ctx.monumentKeys.insert(key).second) {
-            ctx.monuments.push_back(pos);
-            isNew = true;
-        }
-    }
-    if (isNew)
-        checkPairsIncremental(ctx, g, pos);
-}
-
-void processRegion(SearchContext &ctx, MonumentGenerator *g, int regX, int regZ)
-{
-    if (!checkProgress(ctx.progress))
-        return;
-
-    int monumentX = 0;
-    int monumentZ = 0;
-    if (!monument_try_region_g(g, ctx.cfg.mc, ctx.cfg.seed, regX, regZ, &monumentX, &monumentZ))
-        return;
-
-    tryAddMonument(ctx, g, monumentX, monumentZ);
 }
 
 } // namespace
@@ -239,27 +460,34 @@ void runMonumentSearch(
 
     ctx.centerRegX = (cfg.minX + cfg.maxX) / 2;
     ctx.centerRegZ = (cfg.minZ + cfg.maxZ) / 2;
-    ctx.searchMinX = cfg.minX * 512;
-    ctx.searchMaxX = cfg.maxX * 512;
-    ctx.searchMinZ = cfg.minZ * 512;
-    ctx.searchMaxZ = cfg.maxZ * 512;
 
-    ctx.regions.reserve((size_t) std::max(0, cfg.maxX - cfg.minX) * std::max(0, cfg.maxZ - cfg.minZ));
-    for (int x = cfg.minX; x < cfg.maxX; x++) {
-        for (int z = cfg.minZ; z < cfg.maxZ; z++) {
-            ctx.regions.emplace_back(x, z);
+    // Pairwise joint-coverage upper bound table (built once per process, ~100ms)
+    if (cfg.pairLevel >= 3)
+        monument_ensure_pair_upper_bounds();
+
+    // Regions are never materialized: process 64x64 chunks sorted by distance to the search centre
+    // long long: full-world width*height (~1.4e10 regions) overflows 32-bit long on Windows (LLP64)
+    const long long width = std::max(0, cfg.maxX - cfg.minX);
+    const long long height = std::max(0, cfg.maxZ - cfg.minZ);
+    const long long totalTasks = width * height;
+
+    const int chunksW = (int) ((width + CHUNK - 1) / CHUNK);
+    const int chunksH = (int) ((height + CHUNK - 1) / CHUNK);
+    std::vector<std::pair<int, int>> chunks;
+    chunks.reserve((size_t) chunksW * chunksH);
+    for (int cx = 0; cx < chunksW; cx++) {
+        for (int cz = 0; cz < chunksH; cz++) {
+            chunks.emplace_back(cfg.minX + cx * CHUNK, cfg.minZ + cz * CHUNK);
         }
     }
-
-    std::sort(ctx.regions.begin(), ctx.regions.end(), [&](const auto &a, const auto &b) {
-        int dxa = a.first - ctx.centerRegX;
-        int dza = a.second - ctx.centerRegZ;
-        int dxb = b.first - ctx.centerRegX;
-        int dzb = b.second - ctx.centerRegZ;
+    std::sort(chunks.begin(), chunks.end(), [&](const auto &a, const auto &b) {
+        int dxa = a.first + CHUNK / 2 - ctx.centerRegX;
+        int dza = a.second + CHUNK / 2 - ctx.centerRegZ;
+        int dxb = b.first + CHUNK / 2 - ctx.centerRegX;
+        int dzb = b.second + CHUNK / 2 - ctx.centerRegZ;
         return (dxa * dxa + dza * dza) < (dxb * dxb + dzb * dzb);
     });
 
-    const long totalTasks = (long) ctx.regions.size();
     if (totalTasks <= 0) {
         if (progress) {
             progress->current = 0;
@@ -272,14 +500,14 @@ void runMonumentSearch(
     int threads = numThreads > 0 ? numThreads : defaultHwThreads();
     if (progress) {
         progress->current = 0;
-        progress->total = (int) std::min(totalTasks, (long) INT_MAX);
+        progress->total = totalTasks;
         progress->status = 1;
         progress->try_pause = false;
         progress->try_stop = false;
     }
 
-    std::atomic<long> nextIndex{0};
-    std::atomic<long> completed{0};
+    std::atomic<long long> nextIndex{0};
+    std::atomic<long long> completed{0};
 
     {
         ThreadPool pool((size_t) threads);
@@ -294,16 +522,18 @@ void runMonumentSearch(
                     if (!checkProgress(progress))
                         break;
 
-                    long idx = nextIndex.fetch_add(1);
-                    if (idx >= totalTasks)
+                    long long idx = nextIndex.fetch_add(1);
+                    if (idx >= (long long) chunks.size())
                         break;
 
-                    const auto &reg = ctx.regions[(size_t) idx];
-                    processRegion(ctx, g, reg.first, reg.second);
+                    const auto &base = chunks[(size_t) idx];
+                    int bw = (int) std::min((long) CHUNK, (long) cfg.maxX - base.first);
+                    int bh = (int) std::min((long) CHUNK, (long) cfg.maxZ - base.second);
+                    long long cells = 0;
+                    processChunk(ctx, g, base.first, base.second, bw, bh, &cells);
 
                     if (progress) {
-                        long done = completed.fetch_add(1) + 1;
-                        progress->current = (int) std::min(done, totalTasks);
+                        progress->current = completed.fetch_add(cells) + cells;
                     }
                 }
                 monument_generator_free(g);
@@ -312,7 +542,7 @@ void runMonumentSearch(
     }
 
     if (progress) {
-        progress->current = (int) totalTasks;
+        progress->current = totalTasks;
         progress->status = 2;
     }
 }
