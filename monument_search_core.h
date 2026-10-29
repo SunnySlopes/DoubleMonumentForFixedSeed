@@ -60,7 +60,14 @@ int dm_monument_exists_at_block_g(
     int *outBlockX,
     int *outBlockZ);
 
-/** Ocean type at pair center: 0=others, 1=cold, 2=frozen */
+/* Ocean temperature bits returned by dm_monument_classify_ocean_types_g(). */
+#define OCEAN_MASK_FROZEN 0x01
+#define OCEAN_MASK_COLD 0x02
+#define OCEAN_MASK_NORMAL 0x04
+#define OCEAN_MASK_LUKEWARM 0x08
+#define OCEAN_MASK_WARM 0x10
+
+/** Legacy primary ocean type at pair center: 0=others, 1=cold, 2=frozen */
 int dm_monument_classify_ocean_type(
     int mc,
     uint64_t seed,
@@ -68,6 +75,14 @@ int dm_monument_classify_ocean_type(
     int centerZ);
 
 int dm_monument_classify_ocean_type_g(
+    DmMonumentGenerator *g,
+    int mc,
+    int centerX,
+    int centerZ);
+
+/** All ocean temperature types among the four check points (+-64 around the centre) as a
+ *  bitmask of OCEAN_MASK_*; 0 when none of them is ocean. */
+int dm_monument_classify_ocean_types_g(
     DmMonumentGenerator *g,
     int mc,
     int centerX,

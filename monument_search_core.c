@@ -16,6 +16,8 @@ enum {
 /** Minecraft climate band boundaries (temperature / continentalness). */
 static const double TEMP_FROZEN_MAX = -0.45;
 static const double TEMP_COLD_MAX = -0.15;
+static const double TEMP_NORMAL_MAX = 0.2;
+static const double TEMP_LUKEWARM_MAX = 0.55;
 static const double CONT_OCEAN_MAX = -0.11;
 
 static int classify_ocean_point(const BiomeNoise *bn, int blockX, int blockZ)
@@ -28,14 +30,18 @@ static int classify_ocean_point(const BiomeNoise *bn, int blockX, int blockZ)
 
     double cont = np[NP_CONTINENTALNESS] / 10000.0;
     if (cont >= CONT_OCEAN_MAX)
-        return -1;
+        return 0;
 
     double temp = np[NP_TEMPERATURE] / 10000.0;
     if (temp < TEMP_FROZEN_MAX)
-        return OCEAN_TYPE_FROZEN;
+        return OCEAN_MASK_FROZEN;
     if (temp < TEMP_COLD_MAX)
-        return OCEAN_TYPE_COLD;
-    return OCEAN_TYPE_OTHERS;
+        return OCEAN_MASK_COLD;
+    if (temp < TEMP_NORMAL_MAX)
+        return OCEAN_MASK_NORMAL;
+    if (temp < TEMP_LUKEWARM_MAX)
+        return OCEAN_MASK_LUKEWARM;
+    return OCEAN_MASK_WARM;
 }
 
 /** Floor-division mapping from block coordinate to the containing 512-block region. */
@@ -157,33 +163,37 @@ int dm_monument_exists_at_block(
     return dm_monument_exists_at_block_g(&g, mc, seed, targetX, targetZ, outBlockX, outBlockZ);
 }
 
-int dm_monument_classify_ocean_type_g(
+int dm_monument_classify_ocean_types_g(
     DmMonumentGenerator *g,
     int mc,
     int centerX,
     int centerZ)
 {
     static const int offsets[4][2] = {{-64, -64}, {64, -64}, {-64, 64}, {64, 64}};
-    int hasCold = 0;
-    int hasFrozen = 0;
+    int mask = 0;
 
     if (!g || mc < MC_1_18)
-        return OCEAN_TYPE_OTHERS;
+        return 0;
 
     const BiomeNoise *bn = &g->gen.bn;
     for (int i = 0; i < 4; i++) {
         int x = centerX + offsets[i][0];
         int z = centerZ + offsets[i][1];
-        int pt = classify_ocean_point(bn, x, z);
-        if (pt == OCEAN_TYPE_COLD)
-            hasCold = 1;
-        else if (pt == OCEAN_TYPE_FROZEN)
-            hasFrozen = 1;
+        mask |= classify_ocean_point(bn, x, z);
     }
+    return mask;
+}
 
-    if (hasCold)
+int dm_monument_classify_ocean_type_g(
+    DmMonumentGenerator *g,
+    int mc,
+    int centerX,
+    int centerZ)
+{
+    int mask = dm_monument_classify_ocean_types_g(g, mc, centerX, centerZ);
+    if (mask & OCEAN_MASK_COLD)
         return OCEAN_TYPE_COLD;
-    if (hasFrozen)
+    if (mask & OCEAN_MASK_FROZEN)
         return OCEAN_TYPE_FROZEN;
     return OCEAN_TYPE_OTHERS;
 }
