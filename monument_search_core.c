@@ -1203,13 +1203,9 @@ int monument_afk_coverage_dual_reaches(
 //
 // This is a reference ceiling for the reported two-dummy area, not something reachable with the
 // in-game one/two dummies: area_single <= area_dual <= monument_group_max_area <= n*ax*az.
-// Centre of mass of the box blocks counted inside the window [wx0, wx0+wWin) x [wz0, wz0+hWin):
-// the point the single gate/portal would link to for that footprint. Closed form per box.
-static void group_window_centroid(
-    const MonumentBlockPos *p,
-    int n,
-    int ax,
-    int az,
+// Centre of a footprint window [wx0, wx0+wWin) x [wz0, wz0+hWin): the point the single
+// gate/portal links to, and the point AIO draws the 257x257 box around.
+static void group_window_center(
     int wx0,
     int wz0,
     int wWin,
@@ -1217,33 +1213,8 @@ static void group_window_centroid(
     int *outX,
     int *outZ)
 {
-    const int wx1 = wx0 + wWin - 1;
-    const int wz1 = wz0 + hWin - 1;
-    long long sumX = 0, sumZ = 0, cnt = 0;
-    for (int i = 0; i < n; i++) {
-        const int bx0 = p[i].x + AFK_BOX_LO(ax);
-        const int bz0 = p[i].z + AFK_BOX_LO(az);
-        const int bx1 = bx0 + ax - 1;
-        const int bz1 = bz0 + az - 1;
-        const int xa = bx0 > wx0 ? bx0 : wx0;
-        const int xb = bx1 < wx1 ? bx1 : wx1;
-        const int za = bz0 > wz0 ? bz0 : wz0;
-        const int zb = bz1 < wz1 ? bz1 : wz1;
-        if (xa > xb || za > zb)
-            continue;
-        const long long nx = xb - xa + 1;
-        const long long nz = zb - za + 1;
-        sumX += ((long long) xa + xb) * nx / 2 * nz;
-        sumZ += ((long long) za + zb) * nz / 2 * nx;
-        cnt += nx * nz;
-    }
-    if (cnt > 0) {
-        if (outX) *outX = (int) lround((double) sumX / (double) cnt);
-        if (outZ) *outZ = (int) lround((double) sumZ / (double) cnt);
-    } else {
-        if (outX) *outX = wx0 + wWin / 2;
-        if (outZ) *outZ = wz0 + hWin / 2;
-    }
+    if (outX) *outX = wx0 + wWin / 2;
+    if (outZ) *outZ = wz0 + hWin / 2;
 }
 
 int monument_group_max_area(
@@ -1271,10 +1242,13 @@ int monument_group_max_area(
     const int w = maxX - minX + 1;
     const int h = maxZ - minZ + 1;
     const int total = n * ax * az;
+    const int win = DUAL_SPAN_LIMIT + 1; // 257 columns: max-min <= 256
 
-    // the whole group already fits one footprint: every block is coverable
-    if (w <= DUAL_SPAN_LIMIT + 1 && h <= DUAL_SPAN_LIMIT + 1) {
-        group_window_centroid(p, n, ax, az, minX, minZ, w, h, outX, outZ);
+    // the whole group already fits one footprint: centre a 257x257 window on its bbox
+    if (w <= win && h <= win) {
+        const int winMinX = minX - (win - w) / 2;
+        const int winMinZ = minZ - (win - h) / 2;
+        group_window_center(winMinX, winMinZ, win, win, outX, outZ);
         return total;
     }
 
@@ -1305,7 +1279,6 @@ int monument_group_max_area(
             row[x] += prev[x];
     }
 
-    const int win = DUAL_SPAN_LIMIT + 1; // 257 columns: max-min <= 256
     const int wWin = w < win ? w : win;
     const int hWin = h < win ? h : win;
     int best = 0;
@@ -1333,8 +1306,8 @@ int monument_group_max_area(
 
     free(grid);
 
-    // representative point of the winning footprint (window centre if nothing is covered)
-    group_window_centroid(p, n, ax, az, minX + bestX0, minZ + bestZ0, wWin, hWin, outX, outZ);
+    // centre of the winning 257x257 footprint
+    group_window_center(minX + bestX0, minZ + bestZ0, wWin, hWin, outX, outZ);
     return best;
 }
 

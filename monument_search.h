@@ -36,7 +36,7 @@ struct PairHit {
     // ceiling for this group with an unbounded number of dummies but the same max-min<=256
     // footprint: the most box blocks any 257x257 window holds (>= area, reference only)
     int areaMax = 0;
-    // overworld centre of that ceiling footprint (portal / gate location, world coords)
+    // overworld centre of the winning 257x257 footprint (portal / gate location, world coords)
     int areaMaxX = 0;
     int areaMaxZ = 0;
     // true when x2/z2 carry a distinct second dummy point (dual mode)

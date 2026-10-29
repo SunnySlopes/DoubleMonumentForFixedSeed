@@ -129,8 +129,8 @@ int monument_afk_coverage_dual_reaches(
  *  footprint constraint applies (counted blocks must fit max-min <= 256 per axis, i.e. inside a
  *  257x257 block window). Returns the largest number of box blocks any such window contains with
  *  multiset semantics, so area_single <= area_dual <= monument_group_max_area <= n*ax*az.
- *  Also outputs the centre of mass of the blocks counted in the winning window (the overworld
- *  point a single gate/portal for that footprint would link to). Reference value only, not
+ *  Also outputs the centre of the winning 257x257 window (the overworld point a single
+ *  gate/portal for that footprint would link to). Reference value only, not
  *  reachable with one/two dummies. Returns 0 on invalid input or allocation failure. */
 int monument_group_max_area(
     const MonumentBlockPos *p,
