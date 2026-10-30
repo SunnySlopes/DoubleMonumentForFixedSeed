@@ -60,7 +60,9 @@ struct MonumentSearchConfig {
     int maxZ = 0;
     int mc = 25;
     bool pauseOnPairFound = false;
-    // requested group size: 2 = pairs, 3 = triples, 4 = quadruples
+    // minimum requested group size: 2 = pairs, 3 = triples and larger groups (3/4),
+    // 4 = quadruples only. A level-3 group that is part of a quadruple is reported as
+    // the quadruple (once), not as its four triple subsets.
     int pairLevel = 2;
     // false = RNG-only structure positions, skip biome viability sampling
     bool biomeCheck = true;

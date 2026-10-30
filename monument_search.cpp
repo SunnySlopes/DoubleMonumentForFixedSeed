@@ -110,11 +110,11 @@ inline bool groupLinked(const MonumentBlockPos &a, const MonumentBlockPos &b)
     return adx * adx + adz * adz <= GROUP_LINK_DIST_SQ;
 }
 
-void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
+bool emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
 {
     // Skip expensive work once the result queue is full (geometry-only searches produce astronomically many candidates)
     if (ctx.out->full())
-        return;
+        return false;
 
     // A monument cannot be paired with itself. Groups are built from distinct region cells,
     // but a degenerate duplicate would still emit a bogus dx=0, dz=0 hit; reject it here as
@@ -122,7 +122,7 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
     for (int i = 0; i < nn; i++) {
         for (int j = i + 1; j < nn; j++) {
             if (pts[i].x == pts[j].x && pts[i].z == pts[j].z)
-                return;
+                return false;
         }
     }
 
@@ -152,9 +152,9 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
     }
     if (areaMin > 0) {
         if (filterMode == 0 && bound <= areaMin)
-            return;
+            return false;
         if (filterMode == 1 && 2 * bound <= areaMin)
-            return;
+            return false;
     }
 
     int minX = pts[0].x, maxX = pts[0].x, minZ = pts[0].z, maxZ = pts[0].z;
@@ -227,7 +227,7 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
     else
         pass = areaMax > areaMin;
     if (!pass)
-        return;
+        return false;
 
     // the row always carries the ceiling column
     if (areaMax == 0) {
@@ -266,6 +266,7 @@ void emitGroup(SearchContext &ctx, const MonumentBlockPos *pts, int nn)
 
     if (ctx.cfg.pauseOnPairFound && ctx.progress)
         ctx.progress->try_pause = true;
+    return true;
 }
 
 void processChunk(
@@ -397,6 +398,11 @@ void processChunk(
             };
             Member nbrs[8];
             int nn = 0;
+            // Every linked neighbour, including lexicographically smaller in-range ones.
+            // Triple emission only uses the canonical subset above, but exact-level
+            // filtering must see a fourth member on either side of the current cell.
+            Member allNbrs[8];
+            int allNn = 0;
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
                     if (dx == 0 && dz == 0)
@@ -406,9 +412,13 @@ void processChunk(
                     const RegionPos &q = win[(size_t) nx * W + nz];
                     if (!q.ok)
                         continue;
-                    if (inRange(nx, nz) && !lexLessPos(p.x, p.z, q.x, q.z))
-                        continue;
                     if (!groupLinked(MonumentBlockPos{p.x, p.z}, MonumentBlockPos{q.x, q.z}))
+                        continue;
+                    allNbrs[allNn].pos = MonumentBlockPos{q.x, q.z};
+                    allNbrs[allNn].lx = nx;
+                    allNbrs[allNn].lz = nz;
+                    allNn++;
+                    if (inRange(nx, nz) && !lexLessPos(p.x, p.z, q.x, q.z))
                         continue;
                     nbrs[nn].pos = MonumentBlockPos{q.x, q.z};
                     nbrs[nn].lx = nx;
@@ -422,10 +432,52 @@ void processChunk(
             MonumentBlockPos pts[4];
             pts[0] = MonumentBlockPos{p.x, p.z};
 
+            auto emitQuad = [&](int i, int j, int k) {
+                if (!groupLinked(nbrs[i].pos, nbrs[j].pos) ||
+                    !groupLinked(nbrs[i].pos, nbrs[k].pos) ||
+                    !groupLinked(nbrs[j].pos, nbrs[k].pos))
+                    return;
+                if (!viableAt(lx, lz) || !viableAt(nbrs[i].lx, nbrs[i].lz) ||
+                    !viableAt(nbrs[j].lx, nbrs[j].lz) ||
+                    !viableAt(nbrs[k].lx, nbrs[k].lz))
+                    return;
+                pts[1] = nbrs[i].pos;
+                pts[2] = nbrs[j].pos;
+                pts[3] = nbrs[k].pos;
+                emitGroup(ctx, pts, 4);
+            };
+
             if (level == 3) {
+                // 三联搜索按“至少三联”处理：先输出真正的四联组，再输出不属于任何
+                // 四联组的三联组，避免同一组既出四联又出四个三联子集。
+                for (int i = 0; i < nn; i++) {
+                    for (int j = i + 1; j < nn; j++) {
+                        for (int k = j + 1; k < nn; k++) {
+                            emitQuad(i, j, k);
+                        }
+                    }
+                }
                 for (int i = 0; i < nn; i++) {
                     for (int j = i + 1; j < nn; j++) {
                         if (!groupLinked(nbrs[i].pos, nbrs[j].pos))
+                            continue;
+                        // Skip a triple that is only a subset of a real quadruple group;
+                        // the quadruple itself is emitted by the loop above.
+                        bool partOfQuad = false;
+                        for (int k = 0; k < allNn; k++) {
+                            const Member &cand = allNbrs[k];
+                            if (cand.lx == nbrs[i].lx && cand.lz == nbrs[i].lz)
+                                continue;
+                            if (cand.lx == nbrs[j].lx && cand.lz == nbrs[j].lz)
+                                continue;
+                            if (groupLinked(nbrs[i].pos, cand.pos) &&
+                                groupLinked(nbrs[j].pos, cand.pos) &&
+                                viableAt(cand.lx, cand.lz)) {
+                                partOfQuad = true;
+                                break;
+                            }
+                        }
+                        if (partOfQuad)
                             continue;
                         if (!viableAt(lx, lz) || !viableAt(nbrs[i].lx, nbrs[i].lz) ||
                             !viableAt(nbrs[j].lx, nbrs[j].lz))
@@ -438,20 +490,8 @@ void processChunk(
             } else { // level == 4
                 for (int i = 0; i < nn; i++) {
                     for (int j = i + 1; j < nn; j++) {
-                        if (!groupLinked(nbrs[i].pos, nbrs[j].pos))
-                            continue;
                         for (int k = j + 1; k < nn; k++) {
-                            if (!groupLinked(nbrs[i].pos, nbrs[k].pos) ||
-                                !groupLinked(nbrs[j].pos, nbrs[k].pos))
-                                continue;
-                            if (!viableAt(lx, lz) || !viableAt(nbrs[i].lx, nbrs[i].lz) ||
-                                !viableAt(nbrs[j].lx, nbrs[j].lz) ||
-                                !viableAt(nbrs[k].lx, nbrs[k].lz))
-                                continue;
-                            pts[1] = nbrs[i].pos;
-                            pts[2] = nbrs[j].pos;
-                            pts[3] = nbrs[k].pos;
-                            emitGroup(ctx, pts, 4);
+                            emitQuad(i, j, k);
                         }
                     }
                 }
