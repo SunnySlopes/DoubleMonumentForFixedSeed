@@ -24,6 +24,59 @@ repositories {
 dependencies {
 }
 
+// ---------------------------------------------------------------------------
+// DoubleMonumentFinderBase submodule contract
+//
+// All C/C++ search logic and cubiomes live in the DoubleMonumentFinderBase
+// git submodule (https://github.com/SunnySlopes/DoubleMonumentFinderBase).
+// This project keeps only a thin JNI shim (jni/project_MonumentFinderBridge.cpp)
+// that calls the base C API from include/doublemonumentfinder/base.h.
+//
+// The Gradle build configures CMake with the base subdirectory, which builds
+// the base static library + standalone CLI. The JNI shim is linked against the
+// static library, and both the JNI DLL and the base CLI executable are packaged
+// into the JAR. When the submodule (or its nested cubiomes submodule) is
+// missing the build fails with an explicit instruction instead of producing a
+// broken JAR.
+// ---------------------------------------------------------------------------
+def baseDir = file('DoubleMonumentFinderBase')
+def baseHeader = new File(baseDir, 'include/doublemonumentfinder/base.h')
+def baseCmake = new File(baseDir, 'CMakeLists.txt')
+def baseCore = new File(baseDir, 'src/monument_search.cpp')
+def baseCubiomes = new File(baseDir, 'cubiomes/generator.c')
+
+def baseSubmoduleProblems = {
+    def problems = []
+    if (!baseHeader.exists()) {
+        problems << "missing ${baseHeader} (DoubleMonumentFinderBase submodule not checked out)"
+    }
+    if (!baseCmake.exists()) {
+        problems << "missing ${baseCmake} (DoubleMonumentFinderBase submodule not checked out)"
+    }
+    if (!baseCore.exists()) {
+        problems << "missing ${baseCore} (DoubleMonumentFinderBase submodule not checked out)"
+    }
+    if (!baseCubiomes.exists()) {
+        problems << "missing ${baseCubiomes} (nested cubiomes submodule not initialized)"
+    }
+    return problems
+}
+
+def requireBaseSubmodule = {
+    def problems = baseSubmoduleProblems()
+    if (!problems.isEmpty()) {
+        throw new GradleException(
+            "DoubleMonumentFinderBase submodule is not ready:\n  - " + problems.join("\n  - ") +
+            "\n\nInitialize it with:\n  git submodule update --init --recursive")
+    }
+}
+
+tasks.register('verifyBaseSubmodule') {
+    group = 'build'
+    description = 'Checks that DoubleMonumentFinderBase and its nested cubiomes are checked out'
+    doLast { requireBaseSubmodule() }
+}
+
 shadowJar {
     archiveBaseName.set('DoubleMonument')
     archiveClassifier.set('')
@@ -47,7 +100,7 @@ tasks.register('DoubleMonumentForFixedSeedJar', ShadowJar) {
 
 tasks.register('buildAllJars') {
     group = 'build'
-    description = 'Builds executable JAR with native libraries'
+    description = 'Builds executable JAR with native libraries and the base CLI'
     dependsOn 'DoubleMonumentForFixedSeedJar'
 }
 
@@ -56,23 +109,50 @@ def msys2Path() {
     return candidates.find { new File(it, 'gcc.exe').exists() } ?: ''
 }
 
-def resolveJavaHome() {
-    def javaHome = System.getenv('JAVA_HOME')
-    if (javaHome) {
-        return new File(javaHome).absolutePath.replace('\\', '/')
+def normalizeJdkHome(String value) {
+    if (!value) {
+        return null
     }
-    def candidates = [
+    def path = new File(value).absolutePath.replace('\\', '/')
+    if (path.toLowerCase().endsWith('/bin')) {
+        path = path.substring(0, path.length() - 4)
+    }
+    return path
+}
+
+def isJdkHome(String path) {
+    if (!path) {
+        return false
+    }
+    def hasJavac = new File(path, 'bin/javac.exe').exists() || new File(path, 'bin/javac').exists()
+    return hasJavac && new File(path, 'include/jni.h').exists()
+}
+
+def resolveJavaHome() {
+    def candidates = []
+    def envHome = System.getenv('JAVA_HOME')
+    if (envHome) {
+        candidates << envHome
+    }
+    def runningJavaHome = System.getProperty('java.home')
+    if (runningJavaHome) {
+        candidates << runningJavaHome
+    }
+    candidates.addAll([
             'C:/Program Files/Java/jdk-17',
             'C:/Program Files/Eclipse Adoptium/jdk-17',
-            'C:/Program Files/Microsoft/jdk-17'
-    ]
-    for (def path : candidates) {
-        if (new File(path, 'bin/javac.exe').exists()) {
+            'C:/Program Files/Microsoft/jdk-17',
+            'C:/Program Files/Java/latest'
+    ])
+    for (def raw : candidates) {
+        def path = normalizeJdkHome(raw)
+        if (isJdkHome(path)) {
             return path
         }
     }
     throw new GradleException(
-            'JAVA_HOME not set and no JDK 17 found. Set JAVA_HOME to your JDK directory.')
+            'No JDK with javac and include/jni.h found. ' +
+            'Set JAVA_HOME to a JDK root (not its bin subdirectory).')
 }
 
 def nativeBuildPath() {
@@ -89,11 +169,24 @@ def clearStaleCmakeCacheIfNeeded() {
     if (!cache.exists()) {
         return
     }
-    def m = (cache.text =~ /CMAKE_GENERATOR:INTERNAL=(.+)/)
-    if (!m.find()) {
+
+    def expectedSource = layout.projectDirectory.asFile.absolutePath.replace('\\', '/')
+    def sourceMatch = (cache.text =~ /CMAKE_HOME_DIRECTORY:INTERNAL=(.+)/)
+    if (sourceMatch.find()) {
+        def cachedSource = sourceMatch.group(1).trim().replace('\\', '/')
+        if (cachedSource != expectedSource) {
+            logger.lifecycle("Removing stale CMake cache (source '${cachedSource}' != '${expectedSource}').")
+            delete(file('build/CMakeCache.txt'))
+            delete(file('build/CMakeFiles'))
+            return
+        }
+    }
+
+    def generatorMatch = (cache.text =~ /CMAKE_GENERATOR:INTERNAL=(.+)/)
+    if (!generatorMatch.find()) {
         return
     }
-    def existing = m.group(1).trim()
+    def existing = generatorMatch.group(1).trim()
     if (existing != 'Ninja') {
         logger.lifecycle("Removing stale CMake cache (was '${existing}', expected 'Ninja').")
         delete(file('build/CMakeCache.txt'))
@@ -113,7 +206,7 @@ tasks.register('checkNativeToolchain') {
         }
         ['gcc', 'g++', 'ninja', 'cmake'].each { exe ->
             if (!new File(msys, "${exe}.exe").exists()) {
-                throw new GradleException("Missing ${msys}\\${exe}.exe — install via pacman.")
+                throw new GradleException("Missing ${msys}\\${exe}.exe - install via pacman.")
             }
         }
         def javaHome = resolveJavaHome()
@@ -124,12 +217,13 @@ tasks.register('checkNativeToolchain') {
 }
 
 tasks.register('cmakeConfigure', Exec) {
-    dependsOn checkNativeToolchain, compileJava
+    dependsOn 'verifyBaseSubmodule', 'checkNativeToolchain', 'compileJava'
     group = 'build'
-    description = 'Configures CMake for monumentFinderLibJ (Ninja + MinGW)'
+    description = 'Configures CMake for the base library, CLI and JNI shim (Ninja + MinGW)'
     workingDir layout.projectDirectory.asFile
     environment 'PATH', nativeBuildPath()
     doFirst {
+        requireBaseSubmodule()
         clearStaleCmakeCacheIfNeeded()
     }
     def javaHome = resolveJavaHome()
@@ -144,10 +238,12 @@ tasks.register('cmakeConfigure', Exec) {
 tasks.register('buildNative', Exec) {
     dependsOn cmakeConfigure
     group = 'build'
-    description = 'Builds monumentFinderLibJ native library'
+    description = 'Builds DoubleMonumentFinderBase (library + CLI) and the JNI DLL'
     workingDir layout.projectDirectory.asFile
     environment 'PATH', nativeBuildPath()
-    commandLine 'cmake', '--build', 'build', '--target', 'monumentFinderLibJ', '--verbose'
+    commandLine 'cmake', '--build', 'build',
+            '--target', 'monumentFinderLibJ', 'DoubleMonumentFinderBase-cli',
+            '--verbose'
     doFirst {
         if (!file('build/CMakeCache.txt').exists()) {
             throw new GradleException('CMake not configured. Check :cmakeConfigure output above.')
@@ -159,56 +255,86 @@ def generatedNativeResourcesDir = layout.buildDirectory.dir('generated/native-re
 tasks.register('prepareNativeResources') {
     dependsOn tasks.named('buildNative')
     group = 'build'
-    description = 'Collects dll/so/dylib into jar resources'
+    description = 'Collects the JNI DLL and base CLI into jar resources'
     outputs.dir(generatedNativeResourcesDir)
     doLast {
         def outDir = generatedNativeResourcesDir.get().asFile
         delete(outDir)
         outDir.mkdirs()
 
-        def copied = false
-        def buildNativeDir = file('build/native')
-        if (buildNativeDir.exists()) {
-            copy {
-                from(buildNativeDir)
-                include('*.dll', '**/*.dll')
-                into(new File(outDir, 'native/windows'))
-            }
-            copy {
-                from(buildNativeDir)
-                include('*.so', '**/*.so')
-                into(new File(outDir, 'native/linux'))
-            }
-            copy {
-                from(buildNativeDir)
-                include('*.dylib', '**/*.dylib')
-                into(new File(outDir, 'native/macos'))
-            }
-            copied = true
+        def osName = System.getProperty('os.name', '').toLowerCase()
+        def isWindowsHost = osName.contains('windows')
+        def isMacHost = osName.contains('mac') || osName.contains('darwin')
+        def nativeDir = file('build/native')
+        def nativeLibs = isWindowsHost
+            ? ['libmonumentFinderLibJ.dll', 'monumentFinderLibJ.dll']
+            : (isMacHost ? ['libmonumentFinderLibJ.dylib'] : ['libmonumentFinderLibJ.so'])
+        if (!nativeLibs.any { new File(nativeDir, it).exists() }) {
+            throw new GradleException(
+                'Missing build/native ' + nativeLibs.join('/') + '. ' +
+                'Run :buildNative (it builds DoubleMonumentFinderBase first).')
+        }
+        def cliWindows = file('build/bin/DoubleMonumentFinderBase-cli.exe')
+        def cliUnix = file('build/bin/DoubleMonumentFinderBase-cli')
+        if (isWindowsHost && !cliWindows.exists()) {
+            throw new GradleException(
+                'Missing build/bin/DoubleMonumentFinderBase-cli.exe. ' +
+                'Run :buildNative (it builds the base CLI first).')
+        }
+        if (!isWindowsHost && !cliUnix.exists()) {
+            throw new GradleException(
+                'Missing build/bin/DoubleMonumentFinderBase-cli. ' +
+                'Run :buildNative (it builds the base CLI first).')
+        }
+
+        copy {
+            from('build/native')
+            include '*.dll'
+            into(new File(outDir, 'native/windows'))
+        }
+        copy {
+            from('build/native')
+            include '*.so'
+            into(new File(outDir, 'native/linux'))
+        }
+        copy {
+            from('build/native')
+            include '*.dylib'
+            into(new File(outDir, 'native/macos'))
+        }
+        copy {
+            from('build/bin')
+            include 'DoubleMonumentFinderBase-cli.exe'
+            into(new File(outDir, 'native/windows'))
+        }
+        copy {
+            from('build/bin')
+            include 'DoubleMonumentFinderBase-cli'
+            into(new File(outDir, 'native/linux'))
+        }
+        copy {
+            from('build/bin')
+            include 'DoubleMonumentFinderBase-cli'
+            into(new File(outDir, 'native/macos'))
         }
 
         def nativeRoot = file('native')
         if (nativeRoot.exists()) {
             copy {
                 from(nativeRoot)
-                include('**/*.dll')
+                include '**/*.dll'
                 into(new File(outDir, 'native/windows'))
             }
             copy {
                 from(nativeRoot)
-                include('**/*.so')
+                include '**/*.so'
                 into(new File(outDir, 'native/linux'))
             }
             copy {
                 from(nativeRoot)
-                include('**/*.dylib')
+                include '**/*.dylib'
                 into(new File(outDir, 'native/macos'))
             }
-            copied = true
-        }
-
-        if (!copied) {
-            logger.lifecycle('No native libraries found; run buildNative or place libraries under native/')
         }
     }
 }
@@ -221,4 +347,16 @@ tasks.named('processResources') {
 
 tasks.named('DoubleMonumentForFixedSeedJar') {
     dependsOn tasks.named('prepareNativeResources')
+}
+
+// Bundle the base license text next to the main license.
+tasks.withType(Jar).configureEach {
+    from(new File(baseDir, 'LICENSE')) {
+        into 'META-INF/licenses'
+        rename { 'DoubleMonumentFinderBase-LICENSE.txt' }
+    }
+    from(new File(baseDir, 'cubiomes/LICENSE')) {
+        into 'META-INF/licenses'
+        rename { 'cubiomes-LICENSE.txt' }
+    }
 }

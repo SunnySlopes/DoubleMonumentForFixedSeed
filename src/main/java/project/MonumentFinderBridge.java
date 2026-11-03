@@ -11,7 +11,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * JNI bridge for monument pair search (cubiomes).
+ * JNI facade over the DoubleMonumentFinderBase native library.
+ *
+ * <p>The native search core, cubiomes and the standalone CLI live in the
+ * {@code DoubleMonumentFinderBase} git submodule. The main repository keeps
+ * only this thin JNI shim, which forwards to the base public C API
+ * ({@code doublemonumentfinder/base.h}).
  */
 public final class MonumentFinderBridge {
 
@@ -75,7 +80,8 @@ public final class MonumentFinderBridge {
                 }
             }
             throw new UnsatisfiedLinkError(
-                "monumentFinderLibJ native library not found. Build with: gradlew buildNative. "
+                "monumentFinderLibJ native library not found. Initialize the DoubleMonumentFinderBase "
+                    + "submodule and build with: gradlew buildNative. "
                     + firstError.getMessage());
         }
     }

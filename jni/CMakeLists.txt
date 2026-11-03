@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.20)
 
 project(monumentFinderLibJ LANGUAGES C CXX)
 
@@ -39,6 +39,7 @@ find_program(Java_JAVAC_EXECUTABLE javac
 )
 
 set(PROJECT_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
+set(DMF_BASE_DIR ${PROJECT_ROOT}/DoubleMonumentFinderBase)
 set(JAVA_BRIDGE_SRC ${PROJECT_ROOT}/src/main/java/project/MonumentFinderBridge.java)
 set(JNI_GEN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/generated)
 set(JNI_GEN_HEADER ${JNI_GEN_DIR}/project_MonumentFinderBridge.h)
@@ -54,31 +55,26 @@ add_custom_command(
 
 add_custom_target(generate_jni_header DEPENDS ${JNI_GEN_HEADER})
 
-add_subdirectory(${PROJECT_ROOT}/cubiomes ${CMAKE_BINARY_DIR}/cubiomes)
-
-set(SOURCES
+# The search core is provided by the base submodule; this target is only the
+# JNI glue (no search logic).
+add_library(monumentFinderLibJ SHARED
         project_MonumentFinderBridge.cpp
-        ../monument_search.cpp
-        ../monument_search_core.c
-)
-
-add_library(monumentFinderLibJ SHARED ${SOURCES} ${JNI_GEN_HEADER})
+        ${JNI_GEN_HEADER})
 
 add_dependencies(monumentFinderLibJ generate_jni_header)
 
-target_link_libraries(monumentFinderLibJ PRIVATE cubiomes_static)
+target_link_libraries(monumentFinderLibJ PRIVATE doublemonumentfinder_base)
 
 target_include_directories(monumentFinderLibJ PRIVATE
         ${JNI_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/..
-        ../cubiomes
+        ${DMF_BASE_DIR}/include
 )
 
 if(MSVC)
     target_compile_options(monumentFinderLibJ PRIVATE /O2 /DNDEBUG)
 else()
-    target_compile_options(monumentFinderLibJ PRIVATE -O3 -DNDEBUG -ffast-math)
+    target_compile_options(monumentFinderLibJ PRIVATE -O3 -DNDEBUG)
 endif()
 
 if(MINGW)

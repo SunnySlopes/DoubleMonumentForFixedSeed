@@ -1,3 +1,4 @@
-[submodule "cubiomes"]
-	path = cubiomes
-	url = https://github.com/xpple/cubiomes.git
+[submodule "DoubleMonumentFinderBase"]
+	path = DoubleMonumentFinderBase
+	url = https://github.com/SunnySlopes/DoubleMonumentFinderBase.git
+	branch = main

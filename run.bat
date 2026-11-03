@@ -1,2 +1,2 @@
-java -jar build\libs\DoubleMonumentForFixedSeed-1.2.jar
+java -jar build\libs\DoubleMonumentForFixedSeed-2.3.jar
 pause

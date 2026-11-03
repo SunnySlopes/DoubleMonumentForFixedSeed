@@ -32,7 +32,16 @@ git submodule update --init --recursive
 ./gradlew buildNative DoubleMonumentForFixedSeedJar
 ```
 
-Output / 输出：`build/libs/DoubleMonumentForFixedSeed-2.0.jar`
+Output / 输出：`build/libs/DoubleMonumentForFixedSeed-2.3.jar`
+
+The build copies `DoubleMonumentFinderBase` into the CMake build, then links the thin
+JNI shim against the base static library. The JAR contains both
+`native/windows/libmonumentFinderLibJ.dll` and the standalone
+`native/windows/DoubleMonumentFinderBase-cli.exe`.
+
+构建会先编译 `DoubleMonumentFinderBase` 子模块（静态库 + 独立 CLI），再让 JNI 薄桥链接该静态库。
+JAR 中同时包含 `native/windows/libmonumentFinderLibJ.dll` 和独立的
+`native/windows/DoubleMonumentFinderBase-cli.exe`。
 
 On Windows with MSYS2, ensure `C:\msys64\ucrt64\bin` (or `mingw64\bin`) is on `PATH` when running Gradle.
 
@@ -43,7 +52,7 @@ Windows + MSYS2 环境下，运行 Gradle 前请将 `C:\msys64\ucrt64\bin`（或
 ## Run / 运行
 
 ```bash
-java -jar build/libs/DoubleMonumentForFixedSeed-2.0.jar
+java -jar build/libs/DoubleMonumentForFixedSeed-2.3.jar
 ```
 
 Or use `run.bat` after building.  
@@ -54,7 +63,7 @@ The JAR embeds native libraries under `/native/{windows|linux|macos}/`. You can 
 JAR 内嵌原生库，路径为 `/native/{windows|linux|macos}/`。也可指定库路径运行：
 
 ```bash
-java -Djava.library.path=build/native -jar build/libs/DoubleMonumentForFixedSeed-2.0.jar
+java -Djava.library.path=build/native -jar build/libs/DoubleMonumentForFixedSeed-2.3.jar
 ```
 
 ---
@@ -63,7 +72,31 @@ java -Djava.library.path=build/native -jar build/libs/DoubleMonumentForFixedSeed
 
 ```bash
 ./gradlew buildNative compileTestJava
-java -Djava.library.path=build/native -cp "build/classes/java/main;build/classes/java/test" project.MonumentNativeSmokeTest
+java -cp "build/classes/java/main;build/classes/java/test;build/resources/main" project.MonumentNativeSmokeTest
+```
+
+---
+
+## Core library submodule / 核心库子模块
+
+All C/C++ search logic and the [xpple/cubiomes](https://github.com/xpple/cubiomes)
+dependency live in the [DoubleMonumentFinderBase](https://github.com/SunnySlopes/DoubleMonumentFinderBase)
+git submodule at `DoubleMonumentFinderBase/`. This repository keeps only the Java UI and a thin
+JNI shim that forwards to the base C API (`include/doublemonumentfinder/base.h`).
+
+所有 C/C++ 搜索逻辑和 [xpple/cubiomes](https://github.com/xpple/cubiomes) 依赖都在
+`DoubleMonumentFinderBase/` 子模块中。本仓库只保留 Java 界面和转发到 base C API
+（`include/doublemonumentfinder/base.h`）的 JNI 薄桥。
+
+The base repository can also be built and run independently as a CLI:
+
+base 仓库也可以独立构建为命令行程序：
+
+```bash
+cd DoubleMonumentFinderBase
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+./build/bin/DoubleMonumentFinderBase-cli.exe --seed 7 --out result.txt
 ```
 
 ---
@@ -140,9 +173,8 @@ Import a text file (one seed per line), configure region and thread count, then 
 |------|-------------------|
 | `src/main/java/project/` | Swing UI (`DoubleMonumentForFixedSeed`), JNI bridge (`MonumentFinderBridge`), runner (`MonumentSearchRunner`) / 界面、JNI 桥接、搜索编排 |
 | `src/main/resources/messages_*.properties` | UI i18n strings (zh_CN / en_US) / 界面国际化文案 |
-| `monument_search.cpp` / `monument_search_core.c` | C++ search and cubiomes calls / C++ 搜索与 cubiomes 调用 |
-| `jni/` | JNI glue and CMake target `monumentFinderLibJ` |
-| `cubiomes/` | git submodule ([xpple/cubiomes](https://github.com/xpple/cubiomes)) |
+| `jni/` | Thin JNI shim and CMake target `monumentFinderLibJ` / JNI 薄桥与 CMake 目标 |
+| `DoubleMonumentFinderBase/` | git submodule: search core, cubiomes and standalone CLI / 搜索核心、cubiomes 与独立 CLI |
 
 ---
 
@@ -152,7 +184,10 @@ This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for d
 
 本项目采用 **MIT 许可证**，详见 [LICENSE](LICENSE)。
 
-The bundled [cubiomes](https://github.com/xpple/cubiomes) submodule is a third-party project, also licensed under the MIT License (Copyright © 2020 Cubitect).
+The bundled [cubiomes](https://github.com/xpple/cubiomes) submodule (inside
+`DoubleMonumentFinderBase/`) is a third-party project, also licensed under the MIT License
+(Copyright © 2020 Cubitect).
 
-内置的 [cubiomes](https://github.com/xpple/cubiomes) 子模块为第三方项目，同样采用 MIT 许可证（Copyright © 2020 Cubitect）。
+内置的 [cubiomes](https://github.com/xpple/cubiomes) 子模块（位于
+`DoubleMonumentFinderBase/` 内）为第三方项目，同样采用 MIT 许可证（Copyright © 2020 Cubitect）。
 
