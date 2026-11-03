@@ -143,3 +143,16 @@ Import a text file (one seed per line), configure region and thread count, then 
 | `monument_search.cpp` / `monument_search_core.c` | C++ search and cubiomes calls / C++ 搜索与 cubiomes 调用 |
 | `jni/` | JNI glue and CMake target `monumentFinderLibJ` |
 | `cubiomes/` | git submodule ([xpple/cubiomes](https://github.com/xpple/cubiomes)) |
+
+---
+
+## License / 许可证
+
+This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for details.
+
+本项目采用 **MIT 许可证**，详见 [LICENSE](LICENSE)。
+
+The bundled [cubiomes](https://github.com/xpple/cubiomes) submodule is a third-party project, also licensed under the MIT License (Copyright © 2020 Cubitect).
+
+内置的 [cubiomes](https://github.com/xpple/cubiomes) 子模块为第三方项目，同样采用 MIT 许可证（Copyright © 2020 Cubitect）。
+

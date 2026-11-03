@@ -216,6 +216,7 @@ tasks.register('prepareNativeResources') {
 tasks.named('processResources') {
     dependsOn tasks.named('prepareNativeResources')
     from(generatedNativeResourcesDir)
+    from('LICENSE')
 }
 
 tasks.named('DoubleMonumentForFixedSeedJar') {
