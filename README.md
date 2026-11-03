@@ -126,3 +126,11 @@ build\double_monument_selftest.exe 7 -48 48 -48 48 8
   可以删除；
 - 本分支不再需要单独的 cubiomes 子模块，AIO 父仓的 submodule 指针指到
   本分支的提交即可。
+
+---
+
+## 许可证
+
+本项目采用 **MIT 许可证**，详见 [LICENSE](LICENSE)。
+
+本项目依赖的 [cubiomes](https://github.com/xpple/cubiomes) 为第三方项目，同样采用 MIT 许可证（Copyright © 2020 Cubitect）。
